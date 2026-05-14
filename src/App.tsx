@@ -3,11 +3,19 @@ import {
   BookOpen, ChevronRight, ChevronDown, FileText, Layout, Menu, Settings as SettingsIcon,
   Languages, Loader2, Sun, Moon, MessageCircle, Send, Sparkles, RotateCcw,
   PanelRightClose, PanelRightOpen, Cpu, Globe, PanelLeftClose, PanelLeftOpen, 
-  ZoomIn, ZoomOut, Bookmark, BookMarked, BookmarkPlus, Trash2, Library, Compass, Check
+  ZoomIn, ZoomOut, Bookmark, BookMarked, BookmarkPlus, Trash2, Library, Compass, Check, Search, History, Clock, PenLine, Edit3,
+  Highlighter, Download
 } from 'lucide-react';
 import { PaliNode, TranslationMode } from './data/paliTree';
 import { translatePali, chatWithAI, lookupVocabulary, AIConfig, defaultAIConfig } from './services/ai';
 import { fetchTipitakaTree, fetchTipitakaXml } from './services/tipitakaManager';
+import { 
+  saveTranslation, getTranslation, 
+  saveHistory, getHistory, getBookmarks, toggleBookmark as dbToggleBookmark, 
+  saveNote, getNotesByDoc, deleteNote, IDBHistory, IDBNote,
+  saveHighlight, deleteHighlight, getHighlightsByDoc
+} from './services/db';
+import html2pdf from 'html2pdf.js';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -76,26 +84,36 @@ const ClickableText: React.FC<{
   onWordClick: (word: string, context: string) => void;
   isActive: boolean;
   fontSize: number;
-}> = memo(({ text, onWordClick, isActive, fontSize }) => {
+  highlightWord?: string;
+}> = memo(({ text, onWordClick, isActive, fontSize, highlightWord, isHighlighted }) => {
   if (!text) return null;
   if (!isActive) {
-    return <div className="whitespace-pre-wrap leading-[2.2] tracking-wide" style={{ fontSize: `${fontSize}px` }}>{text}</div>;
+    return <div className={`whitespace-pre-wrap leading-[2.2] tracking-wide rounded ${isHighlighted ? 'bg-[#f0c94a] dark:bg-[#7fd1b9] text-black dark:text-black shadow-sm p-1 -m-1' : ''}`} style={{ fontSize: `${fontSize}px` }}>{text}</div>;
   }
 
   const tokens = text.split(/(\s+)/);
 
   return (
-    <div className="whitespace-pre-wrap leading-[2.2] tracking-wide" style={{ fontSize: `${fontSize}px` }}>
+    <div className={`whitespace-pre-wrap leading-[2.2] tracking-wide rounded ${isHighlighted ? 'bg-[#f0c94a] dark:bg-[#7fd1b9] text-black dark:text-black shadow-sm p-1 -m-1' : ''}`} style={{ fontSize: `${fontSize}px` }}>
       {tokens.map((token, i) => {
         if (/\s+/.test(token)) {
           return <React.Fragment key={i}>{token}</React.Fragment>;
         }
         const cleanWord = token.replace(/[^\p{L}\p{M}]/gu, '');
+        let isMatch = false;
+        if (highlightWord && highlightWord.trim().length > 2) {
+           isMatch = cleanWord.toLowerCase().includes(highlightWord.trim().toLowerCase());
+        }
         return (
           <span 
             key={i} 
+            {...(isMatch ? { "data-search-match": "true" } : {})}
             onClick={() => cleanWord && onWordClick(cleanWord, text)}
-            className="cursor-pointer hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 hover:text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-[#1E3A8A] dark:hover:text-[#FFFFF0] rounded px-1 -mx-1 transition-all duration-300 relative"
+            className={`cursor-pointer rounded px-1 -mx-1 transition-all duration-300 relative ${
+               isMatch 
+                  ? 'bg-[#7a808b] dark:bg-[#a07aa6] text-white dark:text-white font-semibold shadow-sm' 
+                  : (isHighlighted ? 'hover:bg-white/30' : 'hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 hover:text-[#1E3A8A] dark:text-[#FFFFF0] dark:hover:text-[#FFFFF0]')
+            }`}
           >
             {token}
           </span>
@@ -109,14 +127,16 @@ const ParsedTranslatedBlock: React.FC<{
   htmlText: string;
   onWordClick: (word: string, context: string) => void;
   fontSize: number;
-}> = memo(({ htmlText, onWordClick, fontSize }) => {
+  highlightWord?: string;
+  isHighlighted?: boolean;
+}> = memo(({ htmlText, onWordClick, fontSize, highlightWord, isHighlighted }) => {
   if (!htmlText) return null;
   // Split by <strong><em> ... </em></strong>
   const regex = /(<strong><em>.*?<\/em><\/strong>)/gs;
   const parts = htmlText.split(regex);
   
   return (
-    <div className="space-y-2 mb-6">
+    <div className={`space-y-2 mb-6 rounded ${isHighlighted ? 'bg-[#f0c94a] dark:bg-[#7fd1b9] text-black dark:text-black shadow-sm p-2 -mx-2' : ''}`}>
       {parts.map((part, index) => {
         if (part.startsWith('<strong><em>') && part.endsWith('</em></strong>')) {
           const vietText = part.replace(/<\/?strong>/g, '').replace(/<\/?em>/g, '');
@@ -130,7 +150,7 @@ const ParsedTranslatedBlock: React.FC<{
           if (!paliText) return null;
           return (
             <div key={index} className="mb-0">
-              <ClickableText text={paliText} isActive={true} onWordClick={onWordClick} fontSize={fontSize} />
+              <ClickableText text={paliText} isActive={true} onWordClick={onWordClick} fontSize={fontSize} highlightWord={highlightWord} />
             </div>
           );
         }
@@ -156,10 +176,108 @@ export default function App() {
   const [documentContent, setDocumentContent] = useState<string>('');
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [isTreeLoading, setIsTreeLoading] = useState(true);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [targetSearchMatch, setTargetSearchMatch] = useState('');
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Search Logic
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
+    
+    const results: any[] = [];
+
+    // 1. Find in current document text
+    if (documentContent && selectedNode) {
+       const paragraphs = documentContent.split(/\n\s*\n/).filter(p => p.trim() !== '');
+       paragraphs.forEach((p, idx) => {
+           if (p.toLowerCase().includes(query.toLowerCase())) {
+               // extract snippet
+               const matchIndex = p.toLowerCase().indexOf(query.toLowerCase());
+               const start = Math.max(0, matchIndex - 60);
+               const end = Math.min(p.length, matchIndex + query.length + 80);
+               let snippet = p.substring(start, end);
+               if (start > 0) snippet = "..." + snippet;
+               if (end < p.length) snippet = snippet + "...";
+               
+               // bold query
+               const regex = new RegExp(`(${query})`, 'gi');
+               snippet = snippet.replace(regex, '<b class="font-bold text-[#1E3A8A] dark:text-[#FFFFF0]">$1</b>');
+
+               results.push({
+                   type: 'text_match',
+                   title: selectedNode.text,
+                   pathOrPosition: `(Đoạn ${idx + 1})`,
+                   snippet,
+                   paragraphIndex: idx
+               });
+           }
+       });
+    }
+
+    // 2. Find in tree
+    const searchRecursively = (nodes: PaliNode[], currentPath: string) => {
+        for (const node of nodes) {
+            const nodePath = currentPath ? `${currentPath} > ${node.text}` : node.text;
+            if (node.text.toLowerCase().includes(query.toLowerCase()) && node.a_attr && node.a_attr.href && node.a_attr.href.endsWith('.xml')) {
+                results.push({ type: 'document_title', title: node.text, pathOrPosition: nodePath, node });
+            }
+            if (node.children && node.children.length > 0) {
+                searchRecursively(node.children, nodePath);
+            }
+        }
+    };
+    searchRecursively(treeData, '');
+
+    setSearchResults(results.slice(0, 30));
+    setShowSearchResults(true);
+  };
+
+  const handleSearchCommit = async () => {
+    if (searchQuery.trim()) {
+       await saveHistory('search', searchQuery.trim(), 'Tìm kiếm toàn bộ');
+       getHistory().then(setHistoryList);
+    }
+  };
+
+  useEffect(() => {
+     const clickOutside = (e: MouseEvent) => {
+        if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+           setShowSearchResults(false);
+        }
+     };
+     document.addEventListener('mousedown', clickOutside);
+     return () => document.removeEventListener('mousedown', clickOutside);
+  }, []);
+
+  useEffect(() => {
+     if (targetSearchMatch && documentContent) {
+        const t = setTimeout(() => {
+            const el = document.querySelector('[data-search-match="true"]');
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 500);
+        return () => clearTimeout(t);
+     }
+  }, [documentContent, targetSearchMatch]);
 
   // Reader Settings State
   const [readerFontSize, setReaderFontSize] = useState(20);
-  const [bookmarks, setBookmarks] = useState<PaliNode[]>([]);
+  const [bookmarks, setBookmarks] = useState<any[]>([]);
+  const [documentNotes, setDocumentNotes] = useState<Record<number, string>>({});
+  const [documentHighlights, setDocumentHighlights] = useState<Record<number, boolean>>({});
+  const [activeNoteEditIndex, setActiveNoteEditIndex] = useState<number | null>(null);
+  const [draftNote, setDraftNote] = useState('');
+  const [historyList, setHistoryList] = useState<IDBHistory[]>([]);
   
   // AI Config State
   const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
@@ -212,10 +330,14 @@ export default function App() {
         setDraftAiConfig(parsed);
       } catch (e) { }
     }
-    const savedBookmarks = localStorage.getItem('tipitaka-bookmarks');
-    if (savedBookmarks) {
-      try { setBookmarks(JSON.parse(savedBookmarks)); } catch (e) { }
-    }
+    
+    // Fetch bookmarks from IDB
+    getBookmarks().then(bms => {
+       setBookmarks(bms.map(b => b.node));
+    });
+
+    // Fetch history
+    getHistory().then(setHistoryList);
   }, [script]);
 
   const saveAiConfig = () => {
@@ -237,30 +359,25 @@ export default function App() {
     localStorage.setItem('tipitaka-ai-config', JSON.stringify(defaultAIConfig));
   };
 
-  const toggleBookmark = () => {
+  const toggleBookmark = async () => {
     if (!selectedNode) return;
-    const exists = bookmarks.find(b => {
-        const id1 = b.id || b.a_attr?.href;
-        const id2 = selectedNode.id || selectedNode.a_attr?.href;
-        return id1 === id2;
-    });
-    let newBookmarks;
-    if (exists) {
-        newBookmarks = bookmarks.filter(b => (b.id || b.a_attr?.href) !== (selectedNode.id || selectedNode.a_attr?.href));
+    const id = (selectedNode.id || selectedNode.a_attr?.href) as string;
+    if (!id) return;
+    const nowBookmarked = await dbToggleBookmark(id, selectedNode.text || selectedNode.name || 'Untitled', selectedNode);
+    if (nowBookmarked) {
+        setBookmarks([...bookmarks, selectedNode]);
     } else {
-        newBookmarks = [...bookmarks, selectedNode];
+        setBookmarks(bookmarks.filter(b => (b.id || b.a_attr?.href) !== id));
     }
-    setBookmarks(newBookmarks);
-    localStorage.setItem('tipitaka-bookmarks', JSON.stringify(newBookmarks));
   };
 
   const isBookmarked = selectedNode && bookmarks.some(b => (b.id || b.a_attr?.href) === (selectedNode.id || selectedNode.a_attr?.href));
 
-  const removeBookmark = (id: string | number, e: React.MouseEvent) => {
+  const removeBookmark = async (id: string | number, e: React.MouseEvent) => {
     e.stopPropagation();
+    await dbToggleBookmark(String(id), '', null); // this toggles it off
     const newBookmarks = bookmarks.filter(b => (b.id || b.a_attr?.href) !== id);
     setBookmarks(newBookmarks);
-    localStorage.setItem('tipitaka-bookmarks', JSON.stringify(newBookmarks));
   };
 
   useEffect(() => {
@@ -274,10 +391,12 @@ export default function App() {
     setDocumentContent('');
     setTranslationResult('');
     setInlineTranslations({});
+    setDocumentNotes({});
     setActiveTranslateIndex(-1);
     setIsMobileMenuOpen(false); 
 
     let content = '';
+    const nodeHref = node.a_attr?.href || String(node.id);
     try {
       if (node.a_attr && node.a_attr.href) {
         content = await fetchTipitakaXml(currentScript, node.a_attr.href);
@@ -285,6 +404,42 @@ export default function App() {
         content = node.content || 'Nội dung đang được cập nhật...';
       }
       setDocumentContent(content);
+      
+      // Save history
+      const title = node.text || node.name || 'Untitled';
+      saveHistory('read', title, currentScript, node).then(() => {
+          getHistory().then(setHistoryList);
+      });
+
+      // Load specific document notes
+      const docNotes = await getNotesByDoc(`${currentScript}_${nodeHref}_para_`);
+      const notesMap: Record<number, string> = {};
+      docNotes.forEach(note => {
+         const idxStr = note.id.split('_para_')[1];
+         if (idxStr) notesMap[parseInt(idxStr)] = note.text;
+      });
+      setDocumentNotes(notesMap);
+
+      // Load specific document highlights
+      const docHighlights = await getHighlightsByDoc(`${currentScript}_${nodeHref}_para_`);
+      const highlightsMap: Record<number, boolean> = {};
+      docHighlights.forEach(h => {
+         const idxStr = h.id.split('_para_')[1];
+         if (idxStr) highlightsMap[parseInt(idxStr)] = true;
+      });
+      setDocumentHighlights(highlightsMap);
+
+      // We proactively try to load cached line-by-line translations
+      const blocks = content.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+      const preloadedTranslations: Record<number, string> = {};
+      for (let i = 0; i < blocks.length; i++) {
+         const cached = await getTranslation(`${currentScript}_${nodeHref}_para_${i}`);
+         if (cached) {
+            preloadedTranslations[i] = cached;
+         }
+      }
+      setInlineTranslations(preloadedTranslations);
+
     } catch (e: any) {
       setDocumentContent(e.message || 'Đã có lỗi xảy ra khi tải nội dung từ xml tipitaka.');
     } finally {
@@ -303,17 +458,158 @@ export default function App() {
     loadDocumentContent(node, script);
   };
 
+  const translateParagraphBase = async (text: string, index: number, nodeHref: string) => {
+      try {
+          const cached = await getTranslation(`${script}_${nodeHref}_para_${index}`);
+          if (cached) {
+             setInlineTranslations(prev => ({...prev, [index]: cached}));
+             return cached;
+          }
+
+          const res = await translatePali(text + '\n\n', 'line-by-line', aiConfig);
+          let filteredRes = res.trim();
+          const badPhrases = [
+             "Vui lòng cung cấp đoạn văn bản",
+             "Tôi đã sẵn sàng",
+             "đúng định dạng yêu cầu",
+             "Vui lòng chọn đoạn văn bản"
+          ];
+          
+          if (badPhrases.some(phrase => filteredRes.includes(phrase)) && !filteredRes.includes("<strong>")) {
+             filteredRes = `${text}\n<strong><em>[Không thể dịch đoạn này]</em></strong>`;
+          } else {
+             badPhrases.forEach(phrase => {
+                const regex = new RegExp(`.*${phrase}.*\n?`, 'gi');
+                filteredRes = filteredRes.replace(regex, '');
+             });
+          }
+          const finalRes = filteredRes.trim();
+          setInlineTranslations(prev => ({...prev, [index]: finalRes}));
+          
+          // Cache it!
+          await saveTranslation(`${script}_${nodeHref}_para_${index}`, finalRes);
+          return finalRes;
+      } catch (e: any) {
+          const errStr = e.message || e.toString();
+          console.error("Translation error at para", index, errStr);
+          return null;
+      }
+  };
+
+  const handleSaveNote = async (index: number) => {
+     if (!selectedNode) return;
+     const nodeHref = selectedNode.a_attr?.href || String(selectedNode.id);
+     const noteId = `${script}_${nodeHref}_para_${index}`;
+     if (draftNote.trim()) {
+         await saveNote(noteId, draftNote.trim());
+         setDocumentNotes(prev => ({...prev, [index]: draftNote.trim()}));
+     } else {
+         await deleteNote(noteId);
+         const updated = {...documentNotes};
+         delete updated[index];
+         setDocumentNotes(updated);
+     }
+     setActiveNoteEditIndex(null);
+     setDraftNote('');
+  };
+
+  const handleEditNote = (index: number) => {
+     setActiveNoteEditIndex(index);
+     setDraftNote(documentNotes[index] || '');
+  };
+
+  const handleToggleHighlight = async (index: number) => {
+     if (!selectedNode) return;
+     const nodeHref = selectedNode.a_attr?.href || String(selectedNode.id);
+     const highlightId = `${script}_${nodeHref}_para_${index}`;
+     
+     if (documentHighlights[index]) {
+         await deleteHighlight(highlightId);
+         const updated = {...documentHighlights};
+         delete updated[index];
+         setDocumentHighlights(updated);
+     } else {
+         await saveHighlight(highlightId);
+         setDocumentHighlights(prev => ({...prev, [index]: true}));
+     }
+  };
+
+  const handleDownloadPDF = async (mode: string) => {
+    const el = document.getElementById('document-print-area');
+    if (!el || !selectedNode) return;
+    const title = selectedNode.text || "Tai_Lieu_Pali";
+    
+    // Create a temporary clone for modification and print formatting
+    const clone = el.cloneNode(true) as HTMLElement;
+    
+    // Apply special classes depending on mode
+    if (mode === 'original') {
+        // Find and remove translated blocks
+        clone.querySelectorAll('.pdf-translation-text').forEach(n => n.remove());
+    } else if (mode === 'vietnamese') {
+        // Find and remove original texts
+        clone.querySelectorAll('.pdf-original-text').forEach(n => n.remove());
+    }
+    
+    // Remove all quick action buttons, toolbars from clone
+    clone.querySelectorAll('.flex.md\\:hidden.gap-3').forEach(n => n.remove());
+    clone.querySelectorAll('.absolute.-left-12').forEach(n => n.remove());
+
+    // Basic styling for print
+    clone.style.padding = '20px 40px';
+    clone.style.background = '#ffffff';
+    clone.style.color = '#000000';
+    
+    const container = document.createElement('div');
+    const header = document.createElement('h1');
+    header.innerText = title;
+    header.style.textAlign = 'center';
+    header.style.marginBottom = '20px';
+    header.style.fontSize = '24px';
+    header.style.color = '#000000';
+    container.appendChild(header);
+    container.appendChild(clone);
+
+    let opt = {
+      margin:       [0.5, 0.5, 0.5, 0.5],
+      filename:     `${title}-${mode}.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(container).save();
+  };
+
+  const handleTranslateSingle = async (index: number) => {
+      const blocks = documentContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+      const text = blocks[index];
+      if (!text || !selectedNode) return;
+      const nodeHref = selectedNode.a_attr?.href || String(selectedNode.id);
+      
+      setActiveTranslateIndex(index);
+      await translateParagraphBase(text, index, nodeHref);
+      setActiveTranslateIndex(-1);
+  };
+
   const handleTranslate = async () => {
-    if (!documentContent) return;
+    if (!documentContent || !selectedNode) return;
     setIsTranslating(true);
+    const nodeHref = selectedNode.a_attr?.href || String(selectedNode.id);
     
     if (translationMode === 'summary') {
       setTranslationResult('');
       if (window.innerWidth < 1024) setActiveTab('translation');
       try {
-        const textToProcess = documentContent.slice(0, 4000); 
-        const result = await translatePali(textToProcess, translationMode, aiConfig);
-        setTranslationResult(result);
+        const cached = await getTranslation(`${script}_${nodeHref}_summary`);
+        if (cached) {
+            setTranslationResult(cached);
+        } else {
+            const textToProcess = documentContent.slice(0, 4000); 
+            const result = await translatePali(textToProcess, translationMode, aiConfig);
+            setTranslationResult(result);
+            await saveTranslation(`${script}_${nodeHref}_summary`, result);
+        }
       } catch (e: any) {
         setTranslationResult("Đã có lỗi xảy ra: " + (e.message || e.toString()) + ". Xin vui lòng thử lại.");
       } finally {
@@ -322,40 +618,13 @@ export default function App() {
     } else if (translationMode === 'line-by-line') {
       if (window.innerWidth < 1024) setActiveTab('translation');
       setTranslationResult('Đang tiến hành dịch từng đoạn trực tiếp trên văn bản...');
-      setInlineTranslations({});
       
       const blocks = documentContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
       for (let i = 0; i < blocks.length; i++) {
-         try {
-            if (i > 0) await new Promise(r => setTimeout(r, 1000)); // 1s base delay between chunks
-            const res = await translatePali(blocks[i] + '\n\n', 'line-by-line', aiConfig);
-            
-            // Lọc bỏ những câu giao tiếp không mong muốn nếu AI vi phạm prompt
-            let filteredRes = res.trim();
-            const badPhrases = [
-               "Vui lòng cung cấp đoạn văn bản",
-               "Tôi đã sẵn sàng",
-               "đúng định dạng yêu cầu",
-               "Vui lòng chọn đoạn văn bản"
-            ];
-            
-            // Nếu AI chỉ trả về toàn câu giao tiếp mà không phải bản dịch, fallback về giữ nguyên văn bản gốc
-            if (badPhrases.some(phrase => filteredRes.includes(phrase)) && !filteredRes.includes("<strong>")) {
-               filteredRes = `${blocks[i]}\n<strong><em>[Không thể dịch đoạn này]</em></strong>`;
-            } else {
-               // Xóa bỏ các dòng thừa nếu có dính cụm từ giao tiếp mồ côi
-               badPhrases.forEach(phrase => {
-                  const regex = new RegExp(`.*${phrase}.*\n?`, 'gi');
-                  filteredRes = filteredRes.replace(regex, '');
-               });
-            }
-            
-            setInlineTranslations(prev => ({...prev, [i]: filteredRes.trim()}));
-         } catch (e: any) {
-            const errStr = e.message || e.toString();
-            setTranslationResult('Đã có lỗi xảy ra trong quá trình dịch: ' + errStr);
-            setIsTranslating(false);
-            return; 
+         if (!inlineTranslations[i]) {
+            // delay to avoid rate limits when bulk translating
+            if (i > 0) await new Promise(r => setTimeout(r, 1000));
+            await translateParagraphBase(blocks[i], i, nodeHref);
          }
       }
       setIsTranslating(false);
@@ -373,6 +642,8 @@ export default function App() {
     try {
       const res = await lookupVocabulary(word, context, aiConfig);
       setVocabData(res);
+      await saveHistory('lookup', word, `Tra cứu từ vựng - ngữ cảnh: "${context.slice(0, 30)}..."`);
+      getHistory().then(setHistoryList);
     } catch (e) {
       setVocabData("Lỗi khi tra từ vựng.");
     } finally {
@@ -391,6 +662,8 @@ export default function App() {
       const context = documentContent ? documentContent.slice(0, 2000) : '';
       const res = await chatWithAI(userMsg, context, chatMessages, aiConfig);
       setChatMessages(prev => [...prev, {role: 'ai', content: res}]);
+      await saveHistory('chat', userMsg, 'Hỏi đáp AI', { chatMessages: [...chatMessages, {role: 'user', content: userMsg}, {role: 'ai', content: res}] });
+      getHistory().then(setHistoryList);
     } catch (e) {
       setChatMessages(prev => [...prev, {role: 'ai', content: 'Lỗi kết nối AI.'}]);
     } finally {
@@ -459,6 +732,72 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          <div className="relative hidden sm:block" ref={searchContainerRef}>
+              <div className="relative">
+                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#1E3A8A]/50 dark:text-[#FFFFF0]/50" />
+                 <input 
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSearchCommit();
+                    }}
+                    onFocus={() => { if(searchQuery.trim()) setShowSearchResults(true) }}
+                    placeholder="Tra cứu..."
+                    className="w-[140px] md:w-[200px] h-10 pl-9 pr-3 text-sm bg-white/50 dark:bg-[#FFFFF0]/10 text-[#1E3A8A] dark:text-[#FFFFF0] border border-[#1E3A8A]/20 dark:border-[#FFFFF0]/30 rounded-xl outline-none placeholder:text-[#1E3A8A]/40 dark:placeholder:text-[#FFFFF0]/40 transition-all focus:ring-2 focus:ring-[#1E3A8A]/30 dark:focus:ring-[#FFFFF0]/30"
+                 />
+              </div>
+              {showSearchResults && searchResults.length > 0 && (
+                 <div className="absolute top-full right-0 sm:left-0 sm:right-auto w-[280px] sm:w-[320px] mt-2 bg-white dark:bg-[#1e1f22] border border-[#1E3A8A]/20 dark:border-[#FFFFF0]/10 rounded-xl shadow-[0_10px_40px_rgba(30,58,138,0.15)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.5)] max-h-[450px] overflow-y-auto custom-scrollbar z-50">
+                    <div className="sticky top-0 bg-white/90 dark:bg-[#1e1f22]/90 backdrop-blur px-3 py-2 text-[11px] font-bold text-[#1E3A8A]/70 dark:text-[#FFFFF0]/70 border-b border-[#1E3A8A]/10 dark:border-[#FFFFF0]/10 uppercase tracking-widest z-10">
+                       Kết quả tra cứu ({searchResults.length})
+                    </div>
+                    {searchResults.map((result, idx) => (
+                       <div 
+                          key={idx} 
+                          className="px-4 py-3 cursor-pointer hover:bg-[#1E3A8A]/5 dark:hover:bg-[#FFFFF0]/5 border-b border-[#1E3A8A]/5 dark:border-[#FFFFF0]/5 last:border-0 transition-colors"
+                          onClick={() => {
+                             if (result.type === 'document_title' && result.node) {
+                                 handleSelectNode(result.node);
+                                 setTargetSearchMatch(searchQuery);
+                                 setTimeout(() => {
+                                     const el = document.querySelector('[data-search-match="true"]');
+                                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                 }, 1000);
+                             } else if (result.type === 'text_match' && result.paragraphIndex !== undefined && selectedNode) {
+                                 handleSelectNode(selectedNode); // Ensure tabs or active states align
+                                 setTargetSearchMatch(searchQuery);
+                                 setTimeout(() => {
+                                     const el = document.getElementById(`para-${result.paragraphIndex}`);
+                                     if (el) {
+                                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                     }
+                                 }, 200);
+                             }
+                             setShowSearchResults(false);
+                          }}
+                       >
+                          <div className="flex flex-col items-center justify-center mb-1 text-center">
+                              <div className="text-[13px] font-bold text-[#1E3A8A] dark:text-[#FFFFF0]">{result.title}</div>
+                              <div className="text-[12px] font-medium text-[#1E3A8A]/80 dark:text-[#FFFFF0]/80">{result.pathOrPosition}</div>
+                          </div>
+                          
+                          {result.type === 'text_match' ? (
+                              <>
+                                <hr className="border-[#1E3A8A]/20 dark:border-[#FFFFF0]/20 my-2" />
+                                <div 
+                                  className="text-[13px] font-sans leading-[1.6] text-[#1E3A8A]/90 dark:text-[#FFFFF0]/90 text-justify" 
+                                  dangerouslySetInnerHTML={{ __html: result.snippet || '' }} 
+                                />
+                              </>
+                          ) : (
+                              <div className="text-[11px] text-[#1E3A8A]/60 dark:text-[#FFFFF0]/50 italic text-center mt-1">Nhấn để mở tài liệu</div>
+                          )}
+                       </div>
+                    ))}
+                 </div>
+              )}
+          </div>
           <Select value={script} onValueChange={setScript}>
             <SelectTrigger className="w-[110px] md:w-[140px] h-10 text-xs md:text-sm font-medium bg-white/50 dark:bg-[#FFFFF0]/10 text-[#1E3A8A] dark:text-[#FFFFF0] border border-[#1E3A8A]/20 dark:border-[#FFFFF0]/30 rounded-xl shrink-0 transition-all duration-300 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/15 hover:shadow-sm focus:ring-1 focus:ring-[#1E3A8A]/30">
               <Globe className="w-4 h-4 mr-1.5 opacity-70 text-[#1E3A8A] dark:text-[#FFFFF0]" />
@@ -533,13 +872,35 @@ export default function App() {
                    <Button variant="ghost" size="icon" onClick={() => setReaderFontSize(f => Math.min(32, f + 2))} className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:text-[#FFFFF0] dark:hover:bg-[#FFFFF0]/10 transition-colors">
                        <ZoomIn className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                    </Button>
-                   <div className="w-px h-5 bg-transparent dark:bg-transparent mx-1"></div>
-                   <Button variant="ghost" size="icon" onClick={toggleBookmark} className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl transition-all duration-300 ${isBookmarked ? 'text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent dark:text-[#FFFFF0] dark:bg-transparent shadow-sm' : 'text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:text-[#FFFFF0] dark:hover:bg-[#FFFFF0]/10'}`}>
+                   <div className="w-px h-5 bg-[#1E3A8A]/30 dark:bg-[#FFFFF0]/30 mx-1"></div>
+                   
+                   {/* PDF Download Dropdown */}
+                   <Select onValueChange={(val) => handleDownloadPDF(val)}>
+                      <SelectTrigger className="border-0 bg-transparent h-8 w-8 sm:h-9 sm:w-8 p-0 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:bg-[#FFFFF0]/10 ring-0 focus:ring-0 [&>svg]:hidden" title="Tải xuống PDF">
+                         <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+                      </SelectTrigger>
+                      <SelectContent align="end">
+                         <SelectItem value="original">
+                            {
+                               script === 'romn' ? 'Roman' :
+                               script === 'mymr' ? 'Myanmar' :
+                               script === 'thai' ? 'Thai' :
+                               script === 'deva' ? 'Devanagari' :
+                               script === 'sinh' ? 'Sinhala' :
+                               script === 'khmr' ? 'Khmer' : 'Nguyên bản'
+                            }
+                         </SelectItem>
+                         <SelectItem value="bilingual">Song ngữ</SelectItem>
+                         <SelectItem value="vietnamese">Việt ngữ</SelectItem>
+                      </SelectContent>
+                   </Select>
+
+                   <Button variant="ghost" size="icon" onClick={toggleBookmark} className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl transition-all duration-300 ${isBookmarked ? 'text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent dark:text-[#FFFFF0] dark:bg-transparent shadow-sm' : 'text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10'}`}>
                        {isBookmarked ? <Bookmark className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current" /> : <BookmarkPlus className="w-4 h-4 sm:w-4.5 sm:h-4.5" />}
                    </Button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar">
+              <div className="flex-1 overflow-y-auto custom-scrollbar" id="document-print-area">
                 <div className="p-6 md:p-10 lg:p-16 max-w-4xl mx-auto">
                   {isLoadingContent ? (
                      <div className="space-y-8 pt-6">
@@ -553,21 +914,118 @@ export default function App() {
                       {documentContent ? (
                         <div className="space-y-6">
                           {documentContent.split(/\n\s*\n/).filter(p => p.trim() !== '').map((para, i) => (
-                            <div key={i} className="mb-6 relative">
+                            <div key={i} id={`para-${i}`} className="mb-8 relative group/para">
                                {inlineTranslations[i] ? (
-                                  <ParsedTranslatedBlock 
-                                     htmlText={inlineTranslations[i]}
-                                     onWordClick={handleWordClick}
-                                     fontSize={readerFontSize}
-                                  />
+                                  <div className="pdf-translation-text">
+                                      <ParsedTranslatedBlock 
+                                         htmlText={inlineTranslations[i]}
+                                         onWordClick={handleWordClick}
+                                         fontSize={readerFontSize}
+                                         highlightWord={targetSearchMatch}
+                                         isHighlighted={!!documentHighlights[i]}
+                                      />
+                                  </div>
                                ) : (
-                                  <ClickableText 
-                                     text={para} 
-                                     isActive={true} 
-                                     onWordClick={handleWordClick}
-                                     fontSize={readerFontSize}
-                                  />
+                                  <div className="pdf-original-text">
+                                      <ClickableText 
+                                         text={para} 
+                                         isActive={true} 
+                                         onWordClick={handleWordClick}
+                                         fontSize={readerFontSize}
+                                         highlightWord={targetSearchMatch}
+                                         isHighlighted={!!documentHighlights[i]}
+                                      />
+                                  </div>
                                )}
+
+                               {/* Quick Action Toolbar (only for untranslated or to add notes) */}
+                               <div className="absolute -left-12 top-0 mt-1 hidden md:flex flex-col gap-2 opacity-0 group-hover/para:opacity-100 transition-opacity">
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => handleToggleHighlight(i)}
+                                    className={`w-8 h-8 rounded-lg ${documentHighlights[i] ? 'text-white bg-[#f0c94a] border-[#f0c94a] dark:text-[#1e1f22] dark:bg-[#7fd1b9] dark:border-[#7fd1b9]' : 'text-[#1E3A8A] border-[#1E3A8A]/30 dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10'}`}
+                                    title="Highlight đoạn này"
+                                  >
+                                      <Highlighter className="w-4 h-4" />
+                                  </Button>
+                                  {!inlineTranslations[i] && (
+                                     <Button
+                                       size="icon"
+                                       variant="outline"
+                                       onClick={() => handleTranslateSingle(i)}
+                                       disabled={activeTranslateIndex === i}
+                                       className="w-8 h-8 rounded-lg text-[#1E3A8A] border-[#1E3A8A]/30 dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10"
+                                       title="Dịch đoạn này"
+                                     >
+                                         {activeTranslateIndex === i ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
+                                     </Button>
+                                  )}
+                                  <Button
+                                    size="icon"
+                                    variant="outline"
+                                    onClick={() => handleEditNote(i)}
+                                    className="w-8 h-8 rounded-lg text-[#1E3A8A] border-[#1E3A8A]/30 dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10"
+                                    title="Ghi chú"
+                                  >
+                                      <PenLine className="w-4 h-4" />
+                                  </Button>
+                               </div>
+
+                               {/* Mobile Action bar */}
+                               <div className="flex md:hidden gap-3 mt-3 opacity-60">
+                                  <button onClick={() => handleToggleHighlight(i)} className={`flex items-center gap-1.5 text-xs ${documentHighlights[i] ? 'text-[#f0c94a] dark:text-[#7fd1b9]' : 'text-[#1E3A8A] dark:text-[#FFFFF0]'}`}>
+                                      <Highlighter className="w-3.5 h-3.5" />
+                                      {documentHighlights[i] ? 'Bỏ Highlight' : 'Highlight'}
+                                  </button>
+                                  {!inlineTranslations[i] && (
+                                    <button onClick={() => handleTranslateSingle(i)} className="flex items-center gap-1.5 text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
+                                        {activeTranslateIndex === i ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Languages className="w-3.5 h-3.5" />}
+                                        Dịch đoạn này
+                                    </button>
+                                  )}
+                                  <button onClick={() => handleEditNote(i)} className="flex items-center gap-1.5 text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
+                                      <PenLine className="w-3.5 h-3.5" />
+                                      Ghi chú
+                                  </button>
+                               </div>
+
+                               {/* Notes Area */}
+                               {activeNoteEditIndex === i ? (
+                                   <div className="mt-4 p-4 rounded-xl border border-[#1E3A8A]/30 dark:border-[#FFFFF0]/30 bg-[#1E3A8A]/5 dark:bg-[#FFFFF0]/5">
+                                      <textarea 
+                                         value={draftNote}
+                                         onChange={(e) => setDraftNote(e.target.value)}
+                                         className="w-full bg-white dark:bg-transparent rounded-lg px-3 py-2 text-sm border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 focus:outline-none focus:ring-1 focus:ring-[#1E3A8A]/50 transition-all font-medium text-[#1E3A8A] dark:text-[#FFFFF0] min-h-[80px]"
+                                         placeholder="Viết ghi chú hoặc câu hỏi để thảo luận với AI..."
+                                         autoFocus
+                                      />
+                                      <div className="flex justify-end gap-2 mt-2">
+                                          <Button size="sm" variant="ghost" onClick={() => setActiveNoteEditIndex(null)} className="h-8 text-xs">Hủy</Button>
+                                          <Button size="sm" onClick={() => handleSaveNote(i)} className="h-8 text-xs bg-[#1E3A8A] hover:bg-[#1E3A8A]/90 text-white dark:bg-[#FFFFF0] dark:text-black dark:hover:bg-[#FFFFF0]/90">
+                                              Lưu Ghi Chú
+                                          </Button>
+                                      </div>
+                                   </div>
+                               ) : documentNotes[i] ? (
+                                   <div className="mt-4 p-4 rounded-xl border border-[#1E3A8A]/20 dark:border-[#FFFFF0]/20 bg-[#1E3A8A]/5 dark:bg-[#FFFFF0]/5 relative group/note">
+                                      <div className="flex items-center gap-2 mb-2 text-[#1E3A8A]/70 dark:text-[#FFFFF0]/70">
+                                         <PenLine className="w-3.5 h-3.5" />
+                                         <span className="text-xs font-bold uppercase tracking-widest">Ghi chú của bạn</span>
+                                      </div>
+                                      <div className="text-[13px] whitespace-pre-wrap leading-relaxed text-[#1E3A8A] dark:text-[#FFFFF0] font-sans">
+                                         {documentNotes[i]}
+                                      </div>
+                                      <Button 
+                                         size="icon" 
+                                         variant="ghost" 
+                                         onClick={() => handleEditNote(i)}
+                                         className="absolute top-2 right-2 w-7 h-7 opacity-0 group-hover/note:opacity-100 transition-opacity hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 text-[#1E3A8A] dark:text-[#FFFFF0]"
+                                      >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                      </Button>
+                                   </div>
+                               ) : null}
                             </div>
                           ))}
                         </div>
@@ -604,14 +1062,52 @@ export default function App() {
           <div className="h-full flex flex-col w-[420px]">
              <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col pt-3">
                <div className="px-4 pb-2 shrink-0">
-                 <TabsList className="flex w-full items-center justify-between bg-transparent dark:bg-transparent rounded-2xl p-1.5 h-12 shadow-inner">
-                   <TabsTrigger value="translation" className="flex-1 px-1 h-full text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><Sparkles className="w-4 h-4 sm:mr-1.5"/><span className="hidden sm:inline">Dịch</span></TabsTrigger>
-                   <TabsTrigger value="dictionary" className="flex-1 px-1 h-full text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><BookOpen className="w-4 h-4 sm:mr-1.5"/><span className="hidden sm:inline">Từ Điển</span></TabsTrigger>
-                   <TabsTrigger value="chat" className="flex-1 px-1 h-full text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><MessageCircle className="w-4 h-4 sm:mr-1.5"/><span className="hidden sm:inline">Hỏi Đáp</span></TabsTrigger>
-                   <TabsTrigger value="bookmarks" className="flex-1 px-1 h-full text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><Library className="w-4 h-4 sm:mr-1.5"/><span className="hidden sm:inline">Lưu</span></TabsTrigger>
-                   <TabsTrigger value="settings" className="flex-1 px-1 h-full text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><SettingsIcon className="w-4 h-4"/></TabsTrigger>
+                 <TabsList className="flex w-full items-center justify-between gap-2 bg-transparent dark:bg-transparent rounded-2xl p-1.5 h-12 shadow-inner">
+                   <TabsTrigger value="translation" title="Dịch Thuật" className="flex-1 px-0 h-full flex justify-center items-center text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><Sparkles className="w-5 h-5"/></TabsTrigger>
+                   <TabsTrigger value="dictionary" title="Từ Điển" className="flex-1 px-0 h-full flex justify-center items-center text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><BookOpen className="w-5 h-5"/></TabsTrigger>
+                   <TabsTrigger value="chat" title="Hỏi Đáp AI" className="flex-1 px-0 h-full flex justify-center items-center text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><MessageCircle className="w-5 h-5"/></TabsTrigger>
+                   <TabsTrigger value="bookmarks" title="Đã Lưu" className="flex-1 px-0 h-full flex justify-center items-center text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><Library className="w-5 h-5"/></TabsTrigger>
+                   <TabsTrigger value="history" title="Lịch Sử Hoạt Động" className="flex-1 px-0 h-full flex justify-center items-center text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><History className="w-5 h-5"/></TabsTrigger>
+                   <TabsTrigger value="settings" title="Cài Đặt" className="flex-1 px-0 h-full flex justify-center items-center text-[13px] font-semibold rounded-xl data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] dark:data-[state=active]:text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent data-[state=active]:bg-white dark:data-[state=active]:bg-transparent shadow-none data-[state=active]:shadow-sm transition-all"><SettingsIcon className="w-5 h-5"/></TabsTrigger>
                  </TabsList>
                </div>
+
+               {/* HISTORY TAB */}
+               <TabsContent value="history" className="flex-1 flex flex-col m-0 outline-none fade-in-0 h-full overflow-hidden bg-white/40 dark:bg-transparent">
+                  <div className="p-5 px-6 border-b border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 font-semibold text-sm text-[#1E3A8A] dark:text-[#FFFFF0] flex items-center gap-2.5 tracking-wide uppercase">
+                     <History className="w-4.5 h-4.5 text-[#1E3A8A] dark:text-[#FFFFF0]" /> Hoạt Động (30 Ngày)
+                  </div>
+                  <div className="flex-1 py-2 px-5 overflow-y-auto custom-scrollbar">
+                     {historyList.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-48 text-[#1E3A8A] dark:text-[#FFFFF0]">
+                           <Clock className="w-12 h-12 mb-4 opacity-50" />
+                           <p className="text-sm font-medium">Chưa có hoạt động nào.</p>
+                        </div>
+                     ) : (
+                        <div className="space-y-4 pt-2">
+                           {historyList.map(item => (
+                              <div key={item.id} className="relative pl-6">
+                                  <div className="absolute left-[3px] top-1.5 w-2 h-2 rounded-full bg-[#1E3A8A]/50 dark:bg-[#FFFFF0]/50 outline outline-4 outline-white dark:outline-[#1e1f22]" />
+                                  <div className="absolute left-[6px] top-3 bottom-[-16px] w-[2px] bg-[#1E3A8A]/10 dark:bg-[#FFFFF0]/10" />
+                                  
+                                  <div className="text-[10px] uppercase font-bold text-[#1E3A8A]/50 dark:text-[#FFFFF0]/50 mb-1">
+                                      {new Date(item.timestamp).toLocaleString('vi-VN')} • {item.type === 'read' ? 'Đọc' : item.type === 'search' ? 'Tìm' : item.type === 'chat' ? 'Hỏi Đáp' : 'Tra Cứu'}
+                                  </div>
+                                  <div className="font-bold text-[#1E3A8A] dark:text-[#FFFFF0] text-sm mb-0.5">
+                                      {item.title}
+                                  </div>
+                                  <div className="text-xs text-[#1E3A8A]/80 dark:text-[#FFFFF0]/80">
+                                      {item.detail}
+                                  </div>
+                                  {item.type === 'read' && item.data && (
+                                     <button onClick={() => { handleSelectNode(item.data); setActiveTab('translation'); }} className="mt-2 text-xs font-semibold text-[#1E3A8A] dark:text-[#FFFFF0] underline hover:no-underline">Mở lại tài liệu đổi chiếu</button>
+                                  )}
+                              </div>
+                           ))}
+                        </div>
+                     )}
+                  </div>
+               </TabsContent>
 
                {/* TRANSLATION TAB */}
                <TabsContent value="translation" className="flex-1 flex flex-col m-0 outline-none fade-in-0 h-full overflow-hidden">

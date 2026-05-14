@@ -257,15 +257,30 @@ async function startServer() {
   }));
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+  if (process.env.NODE_ENV !== "production" && !process.env.ELECTRON_RUN_AS_NODE) {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.warn("Vite not found, falling back to static serving.", e);
+      serveStatic();
+    }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    serveStatic();
+  }
+
+  function serveStatic() {
+    let distPath = path.join(process.cwd(), 'dist');
+    // In electron packaged app, __dirname might be inside Resources/app.asar/dist
+    if (__dirname.endsWith('dist') || __dirname.endsWith('dist\\') || __dirname.endsWith('dist/')) {
+       distPath = __dirname;
+    } else if (require('fs').existsSync(path.join(__dirname, 'dist'))) {
+       distPath = path.join(__dirname, 'dist');
+    }
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

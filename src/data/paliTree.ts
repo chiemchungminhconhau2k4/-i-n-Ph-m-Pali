@@ -1,4 +1,4 @@
-export type TranslationMode = 'line-by-line' | 'summary' | 'vocabulary';
+export type TranslationMode = 'line-by-line' | 'summary' | 'vocabulary' | 'paragraph';
 
 export interface PaliNode {
   id?: string | number;
