@@ -18,59 +18,105 @@ const SYSTEM_INSTRUCTION = "Bạn là một công cụ dịch thuật Pali-Việ
 async function callAIEndpoint(prompt: string, systemMessage: string, temperature: number, config: AIConfig) {
   const finalSystemMessage = config.customPrompt && config.customPrompt.trim() !== '' ? config.customPrompt : systemMessage;
   
+  if (!config.apiKey && config.provider !== 'google') {
+      throw new Error(`API Key is required for provider: ${config.provider}`);
+  }
+
   let attempts = 0;
   const maxAttempts = 3;
   
   while (attempts < maxAttempts) {
     try {
-      const response = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: config.provider,
-          model: config.model,
-          apiKey: config.apiKey,
-          prompt,
-          systemMessage: finalSystemMessage,
-          temperature
-        })
-      });
+      let dataText = '';
 
-      if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-          const text = await response.text();
-          try {
-            const errorData = JSON.parse(text);
-            if (errorData.error) {
-               if (typeof errorData.error === 'string') {
-                  errorMessage = `[${response.status}] ${errorData.error}`;
-               } else {
-                  errorMessage = `[${response.status}] ${JSON.stringify(errorData.error)}`;
-               }
-            }
-          } catch (e) {
-            if (text && !text.trim().startsWith('<')) {
-              errorMessage = `[${response.status}] ${text.substring(0, 500)}`; 
-            } else {
-              errorMessage += ' (Server returned HTML or unknown format)';
-            }
-          }
-        } catch (e) {}
-        throw new Error(errorMessage);
+      if (config.provider === 'google') {
+          // You must secure the API Key. For this electron/browser local app, it's ok.
+          const apiKey = config.apiKey || import.meta.env.VITE_GEMINI_API_KEY;
+          if (!apiKey) throw new Error("Gemini API key is required");
+          
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.model || 'gemini-3.1-pro-preview'}:generateContent?key=${apiKey}`;
+          const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  systemInstruction: { parts: [{ text: finalSystemMessage }] },
+                  generationConfig: { temperature: temperature }
+              })
+          });
+          if (!res.ok) throw new Error(`Google API Error: ${res.status} ${await res.text()}`);
+          const data = await res.json();
+          dataText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } 
+      else if (config.provider === 'openai') {
+          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${config.apiKey}`
+              },
+              body: JSON.stringify({
+                  model: config.model || "gpt-4o",
+                  messages: [
+                      { role: "system", content: finalSystemMessage },
+                      { role: "user", content: prompt }
+                  ],
+                  temperature: temperature,
+              })
+          });
+          if (!res.ok) throw new Error(`OpenAI API Error: ${res.status} ${await res.text()}`);
+          const data = await res.json();
+          dataText = data.choices?.[0]?.message?.content || '';
+      }
+      else if (config.provider === 'anthropic') {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'x-api-key': config.apiKey,
+                  'anthropic-version': '2023-06-01',
+                  'anthropic-dangerous-direct-browser-access': 'true'
+              },
+              body: JSON.stringify({
+                  model: config.model || "claude-3-5-sonnet-20240620",
+                  system: finalSystemMessage,
+                  messages: [
+                      { role: "user", content: prompt }
+                  ],
+                  max_tokens: 4096,
+                  temperature: temperature,
+              })
+          });
+          if (!res.ok) throw new Error(`Anthropic API Error: ${res.status} ${await res.text()}`);
+          const data = await res.json();
+          dataText = data.content?.[0]?.text || '';
+      }
+      else if (config.provider === 'deepseek') {
+          const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${config.apiKey}`
+              },
+              body: JSON.stringify({
+                  model: config.model || "deepseek-chat",
+                  messages: [
+                      { role: "system", content: finalSystemMessage },
+                      { role: "user", content: prompt }
+                  ],
+                  temperature: temperature,
+              })
+          });
+          if (!res.ok) throw new Error(`DeepSeek API Error: ${res.status} ${await res.text()}`);
+          const data = await res.json();
+          dataText = data.choices?.[0]?.message?.content || '';
       }
 
-      let data;
-      try {
-        data = await response.json();
-      } catch (e: any) {
-        throw new Error(`Invalid JSON response from server (Status: ${response.status}). The server might be down or returning an error page.`);
-      }
-      return data.text;
+      return dataText;
 
     } catch (err: any) {
       const errStr = err.message || err.toString();
-      const isRateLimitOrOverload = errStr.includes("429") || errStr.includes("quota") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.toLowerCase().includes("rate") || errStr.includes("502") || errStr.includes("503") || errStr.includes("high demand") || errStr.includes("504");
+      const isRateLimitOrOverload = errStr.includes("429") || errStr.includes("quota") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("503") || errStr.includes("high demand");
       
       attempts++;
       

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { PaliNode, TranslationMode } from './data/paliTree';
 import { translatePali, chatWithAI, lookupVocabulary, AIConfig, defaultAIConfig } from './services/ai';
+import { fetchTipitakaTree, fetchTipitakaXml } from './services/tipitakaManager';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -190,10 +191,9 @@ export default function App() {
   // Fetch Tree
   useEffect(() => {
     setIsTreeLoading(true);
-    fetch('/api/tipitaka/tree?script=' + script)
-      .then(r => r.json())
+    fetchTipitakaTree(script)
       .then(data => {
-         setTreeData(data);
+         setTreeData(data); 
          setIsTreeLoading(false);
       })
       .catch(e => {
@@ -280,14 +280,7 @@ export default function App() {
     let content = '';
     try {
       if (node.a_attr && node.a_attr.href) {
-        const url = `/api/tipitaka/xmlcontent?script=${currentScript}&filename=${encodeURIComponent(node.a_attr.href)}`;
-        const res = await fetch(url);
-        if (!res.ok) {
-           const errData = await res.json().catch(()=>({}));
-           throw new Error(errData.error || 'Failed to fetch content');
-        }
-        const data = await res.json();
-        content = data.content;
+        content = await fetchTipitakaXml(currentScript, node.a_attr.href);
       } else {
         content = node.content || 'Nội dung đang được cập nhật...';
       }
@@ -459,8 +452,8 @@ export default function App() {
                <Library className="w-5 h-5 relative z-10 transition-transform group-hover:rotate-12 duration-500" />
                <Sparkles className="w-3.5 h-3.5 absolute -bottom-1 -right-1 text-[#1E3A8A] dark:text-[#FFFFF0] opacity-90 animate-pulse" />
             </div>
-            <h1 className="font-serif font-bold text-[22px] tracking-wide text-[#1E3A8A] dark:text-[#FFFFF0] group-hover:text-[#1E3A8A] dark:text-[#FFFFF0] dark:group-hover:text-white/90 transition-colors duration-300 uppercase">
-              ĐIỂN PHẠM <span className="font-sans font-medium text-[#1E3A8A] dark:text-[#FFFFF0] text-lg opacity-90 pl-1">PALI</span>
+            <h1 className="font-serif font-bold text-[22px] tracking-wide text-[#1E3A8A] dark:text-[#FFFFF0] group-hover:text-[#1E3A8A] dark:group-hover:text-[#FFFFF0] transition-colors duration-300 uppercase">
+              ĐIỂN PHẠM PALI
             </h1>
           </div>
         </div>
