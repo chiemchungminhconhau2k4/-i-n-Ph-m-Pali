@@ -1,5 +1,5 @@
 export const DB_NAME = 'dienPhamPaliDB';
-export const DB_VERSION = 6; // Upgraded version for new stores
+export const DB_VERSION = 8; // Upgraded version for new stores
 
 export interface IDBTranslation {
   id: string; // e.g., `${script}_${nodeHref}_${mode}` or `${script}_${nodeHref}_para_${idx}`
@@ -8,22 +8,17 @@ export interface IDBTranslation {
 }
 
 export interface IDBHistory {
-  id: string;
-  type: 'read' | 'search' | 'chat' | 'lookup';
-  title: string;
-  detail: string;
-  timestamp: number;
+  id: string; 
+  type: 'chat' | 'translate' | 'lookup' | 'read';
+  title?: string;
+  detail?: string;
   data?: any;
+  timestamp: number;
 }
 
 export interface IDBNote {
   id: string; // e.g., `${script}_${nodeHref}_para_${idx}`
   text: string;
-  timestamp: number;
-}
-
-export interface IDBHighlight {
-  id: string; // e.g., `${script}_${nodeHref}_para_${idx}`
   timestamp: number;
 }
 
@@ -40,14 +35,35 @@ export interface IDBBookmark {
   node: any;
 }
 
+let dbInstance: IDBDatabase | null = null;
+
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
+    if (dbInstance) {
+        return resolve(dbInstance);
+    }
     try {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = () => reject(request.error);
 
-      request.onsuccess = () => resolve(request.result);
+      request.onblocked = () => {
+          console.warn("IndexedDB update blocked. Closing old connections.");
+          if (dbInstance) {
+              dbInstance.close();
+              dbInstance = null;
+          }
+      };
+
+      request.onsuccess = () => {
+          const db = request.result;
+          db.onversionchange = () => {
+              db.close();
+              dbInstance = null;
+          };
+          dbInstance = db;
+          resolve(db);
+      };
 
       request.onupgradeneeded = (event: any) => {
         const db = event.target.result as IDBDatabase;
@@ -59,7 +75,6 @@ const openDB = (): Promise<IDBDatabase> => {
                 db.createObjectStore(store, { keyPath: 'id' });
             } else {
                 const existingStore = transaction.objectStore(store);
-                // If it lacks key path or the key path is incorrect, drop and recreate
                 if (existingStore.keyPath !== 'id') {
                     db.deleteObjectStore(store);
                     db.createObjectStore(store, { keyPath: 'id' });
@@ -73,40 +88,25 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-export const cleanupOldHistory = async () => {
+const putAction = async (storeName: string, obj: any) => {
     const db = await openDB();
-    const transaction = db.transaction('history', 'readwrite');
-    const store = transaction.objectStore('history');
-    const request = store.getAll();
-
     return new Promise<void>((resolve, reject) => {
-        request.onsuccess = () => {
-            const now = Date.now();
-            const items = request.result as IDBHistory[];
-            items.forEach(item => {
-                if (now - item.timestamp > THIRTY_DAYS_MS) {
-                    store.delete(item.id);
-                }
-            });
-            resolve();
-        };
-        request.onerror = () => reject(request.error);
+        const transaction = db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        try {
+            const req = store.put(obj);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        } catch (e) {
+            reject(e);
+        }
+    }).catch(e => {
+        console.error(`Error putting in ${storeName}`, obj, e);
     });
 };
 
 export const saveTranslation = async (id: string, text: string) => {
-    if (!id) return;
-    const db = await openDB();
-    const transaction = db.transaction('translations', 'readwrite');
-    const store = transaction.objectStore('translations');
-    const obj = { id: String(id), text, timestamp: Date.now() };
-    try {
-        store.put(obj);
-    } catch (e) {
-        console.error("error putting in translations", obj, e);
-    }
+    await putAction('translations', { id: String(id), text, timestamp: Date.now() });
 };
 
 export const getTranslation = async (id: string): Promise<string | null> => {
@@ -120,50 +120,51 @@ export const getTranslation = async (id: string): Promise<string | null> => {
     });
 };
 
-export const saveHistory = async (type: 'read' | 'search' | 'chat' | 'lookup', title: string, detail: string, data?: any) => {
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+export const cleanupOldHistory = async () => {
     const db = await openDB();
     const transaction = db.transaction('history', 'readwrite');
     const store = transaction.objectStore('history');
-    const id = `${type}_${Date.now()}`;
-    const obj = { id: String(id), type, title, detail, data, timestamp: Date.now() };
-    try {
-        store.put(obj);
-    } catch (e) {
-        console.error("Failed to put in history store", obj, e);
-    }
     
-    // Auto cleanup
+    return new Promise<void>((resolve, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => {
+            const items = request.result as IDBHistory[];
+            const now = Date.now();
+            items.forEach(item => {
+                if (now - item.timestamp > THIRTY_DAYS_MS) {
+                    store.delete(item.id);
+                }
+            });
+            resolve();
+        };
+        request.onerror = () => reject(request.error);
+    });
+};
+
+export const saveHistory = async (type: IDBHistory['type'], title?: string, detail?: string, data?: any) => {
+    const id = `${type}_${Date.now()}`;
+    await putAction('history', { id: String(id), type, title, detail, data, timestamp: Date.now() });
     cleanupOldHistory();
 };
 
-export const getHistory = async (type?: 'read' | 'search' | 'chat' | 'lookup'): Promise<IDBHistory[]> => {
+export const getHistory = async (): Promise<IDBHistory[]> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction('history', 'readonly');
         const store = transaction.objectStore('history');
         const request = store.getAll();
         request.onsuccess = () => {
-            let items = request.result as IDBHistory[];
-            if (type) items = items.filter(i => i.type === type);
-            // Sort by newest first
-            items.sort((a, b) => b.timestamp - a.timestamp);
-            resolve(items);
+            const items = request.result as IDBHistory[];
+            resolve(items.sort((a, b) => b.timestamp - a.timestamp));
         };
         request.onerror = () => reject(request.error);
     });
 };
 
 export const saveNote = async (id: string, text: string) => {
-    if (!id) return;
-    const db = await openDB();
-    const transaction = db.transaction('notes', 'readwrite');
-    const store = transaction.objectStore('notes');
-    const obj = { id: String(id), text, timestamp: Date.now() };
-    try {
-        store.put(obj);
-    } catch (e) {
-        console.error("error putting in notes", obj, e);
-    }
+    await putAction('notes', { id: String(id), text, timestamp: Date.now() });
 };
 
 export const getNotesByDoc = async (docPrefix: string): Promise<IDBNote[]> => {
@@ -193,30 +194,35 @@ export const getNote = async (id: string): Promise<string | null> => {
 
 export const deleteNote = async (id: string) => {
     const db = await openDB();
-    const transaction = db.transaction('notes', 'readwrite');
-    const store = transaction.objectStore('notes');
-    store.delete(id);
+    return new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction('notes', 'readwrite');
+        const store = transaction.objectStore('notes');
+        const req = store.delete(id);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
 };
 
 export const toggleBookmark = async (id: string, title: string, node: any): Promise<boolean> => {
-    if (!id) return false;
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction('bookmarks', 'readwrite');
         const store = transaction.objectStore('bookmarks');
         const getRequest = store.get(String(id));
-        getRequest.onsuccess = () => {
+        
+        getRequest.onsuccess = async () => {
             if (getRequest.result) {
-                store.delete(String(id));
-                resolve(false); // Removed
+                const delReq = store.delete(String(id));
+                delReq.onsuccess = () => resolve(false); // Removed
+                delReq.onerror = () => reject(delReq.error);
             } else {
-                const obj = { id: String(id), title, node, timestamp: Date.now() };
                 try {
-                    store.put(obj);
-                } catch (e) {
-                    console.error("error putting in bookmarks", obj, e);
+                   const putReq = store.put({ id: String(id), title, node, timestamp: Date.now() });
+                   putReq.onsuccess = () => resolve(true); // Added
+                   putReq.onerror = () => reject(putReq.error);
+                } catch(e) {
+                   reject(e);
                 }
-                resolve(true); // Added
             }
         };
         getRequest.onerror = () => reject(getRequest.error);
@@ -229,16 +235,12 @@ export const getBookmarks = async (): Promise<IDBBookmark[]> => {
         const transaction = db.transaction('bookmarks', 'readonly');
         const store = transaction.objectStore('bookmarks');
         const request = store.getAll();
-        request.onsuccess = () => {
-            const items = request.result as IDBBookmark[];
-            items.sort((a, b) => b.timestamp - a.timestamp);
-            resolve(items);
-        };
+        request.onsuccess = () => resolve((request.result as IDBBookmark[]).sort((a, b) => b.timestamp - a.timestamp));
         request.onerror = () => reject(request.error);
     });
 };
 
-export const isBookmarked = async (id: string): Promise<boolean> => {
+export const checkBookmark = async (id: string): Promise<boolean> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction('bookmarks', 'readonly');
@@ -250,34 +252,29 @@ export const isBookmarked = async (id: string): Promise<boolean> => {
 };
 
 export const saveHighlight = async (id: string) => {
-    if (!id) return;
-    const db = await openDB();
-    const transaction = db.transaction('highlights', 'readwrite');
-    const store = transaction.objectStore('highlights');
-    const obj = { id: String(id), timestamp: Date.now() };
-    try {
-        store.put(obj);
-    } catch (e) {
-        console.error("error putting in highlights", obj, e);
-    }
+    await putAction('highlights', { id: String(id), timestamp: Date.now() });
 };
 
 export const deleteHighlight = async (id: string) => {
     const db = await openDB();
-    const transaction = db.transaction('highlights', 'readwrite');
-    const store = transaction.objectStore('highlights');
-    store.delete(id);
+    return new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction('highlights', 'readwrite');
+        const store = transaction.objectStore('highlights');
+        const req = store.delete(id);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
 };
 
-export const getHighlightsByDoc = async (docPrefix: string): Promise<IDBHighlight[]> => {
+export const getHighlightsByDoc = async (docPrefix: string): Promise<string[]> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction('highlights', 'readonly');
         const store = transaction.objectStore('highlights');
         const request = store.getAll();
         request.onsuccess = () => {
-            const items = request.result as IDBHighlight[];
-            resolve(items.filter(i => i.id.startsWith(docPrefix)));
+            const items = request.result as any[];
+            resolve(items.filter(i => i.id.startsWith(docPrefix)).map(i => i.id));
         };
         request.onerror = () => reject(request.error);
     });
@@ -285,15 +282,7 @@ export const getHighlightsByDoc = async (docPrefix: string): Promise<IDBHighligh
 
 export const saveToCache = async (id: string, data: any) => {
     if (!id) return;
-    const db = await openDB();
-    const transaction = db.transaction('cache', 'readwrite');
-    const store = transaction.objectStore('cache');
-    const obj = { id: String(id), data, timestamp: Date.now() };
-    try {
-        store.put(obj);
-    } catch (e) {
-        console.error("error putting in cache", obj, e);
-    }
+    await putAction('cache', { id: String(id), data, timestamp: Date.now() });
 };
 
 export const getFromCache = async (id: string): Promise<any | null> => {
@@ -303,6 +292,12 @@ export const getFromCache = async (id: string): Promise<any | null> => {
         const store = transaction.objectStore('cache');
         const request = store.get(id);
         request.onsuccess = () => resolve(request.result ? request.result.data : null);
-        request.onerror = () => reject(request.error);
+        request.onerror = () => {
+            console.warn("Missing index or store?", request.error);
+            resolve(null);
+        };
+    }).catch(e => {
+        console.warn("Catch cache get:", e);
+        return null;
     });
 };

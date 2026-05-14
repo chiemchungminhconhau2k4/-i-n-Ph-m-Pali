@@ -18,6 +18,7 @@ import {
 import html2pdf from 'html2pdf.js';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -875,12 +876,14 @@ export default function App() {
                    <div className="w-px h-5 bg-[#1E3A8A]/30 dark:bg-[#FFFFF0]/30 mx-1"></div>
                    
                    {/* PDF Download Dropdown */}
-                   <Select onValueChange={(val) => handleDownloadPDF(val)}>
-                      <SelectTrigger className="border-0 bg-transparent h-8 w-8 sm:h-9 sm:w-8 p-0 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:bg-[#FFFFF0]/10 ring-0 focus:ring-0 [&>svg]:hidden" title="Tải xuống PDF">
-                         <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
-                      </SelectTrigger>
-                      <SelectContent align="end">
-                         <SelectItem value="original">
+                   <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                         <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:bg-[#FFFFF0]/10" title="Tải xuống PDF">
+                            <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+                         </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 bg-white/95 dark:bg-transparent backdrop-blur-xl">
+                         <DropdownMenuItem onClick={() => handleDownloadPDF('original')} className="cursor-pointer">
                             {
                                script === 'romn' ? 'Roman' :
                                script === 'mymr' ? 'Myanmar' :
@@ -889,11 +892,11 @@ export default function App() {
                                script === 'sinh' ? 'Sinhala' :
                                script === 'khmr' ? 'Khmer' : 'Nguyên bản'
                             }
-                         </SelectItem>
-                         <SelectItem value="bilingual">Song ngữ</SelectItem>
-                         <SelectItem value="vietnamese">Việt ngữ</SelectItem>
-                      </SelectContent>
-                   </Select>
+                         </DropdownMenuItem>
+                         <DropdownMenuItem onClick={() => handleDownloadPDF('bilingual')} className="cursor-pointer">Song ngữ</DropdownMenuItem>
+                         <DropdownMenuItem onClick={() => handleDownloadPDF('vietnamese')} className="cursor-pointer">Việt ngữ</DropdownMenuItem>
+                      </DropdownMenuContent>
+                   </DropdownMenu>
 
                    <Button variant="ghost" size="icon" onClick={toggleBookmark} className={`h-8 w-8 sm:h-9 sm:w-9 rounded-xl transition-all duration-300 ${isBookmarked ? 'text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent dark:text-[#FFFFF0] dark:bg-transparent shadow-sm' : 'text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10'}`}>
                        {isBookmarked ? <Bookmark className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current" /> : <BookmarkPlus className="w-4 h-4 sm:w-4.5 sm:h-4.5" />}
