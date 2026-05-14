@@ -1,5 +1,5 @@
 export const DB_NAME = 'dienPhamPaliDB';
-export const DB_VERSION = 4; // Upgraded version for new stores
+export const DB_VERSION = 6; // Upgraded version for new stores
 
 export interface IDBTranslation {
   id: string; // e.g., `${script}_${nodeHref}_${mode}` or `${script}_${nodeHref}_para_${idx}`
@@ -42,34 +42,34 @@ export interface IDBBookmark {
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    try {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => reject(request.error);
+      request.onerror = () => reject(request.error);
 
-    request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => resolve(request.result);
 
-    request.onupgradeneeded = (event: any) => {
-      const db = event.target.result as IDBDatabase;
-      
-      if (!db.objectStoreNames.contains('translations')) {
-        db.createObjectStore('translations', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('history')) {
-        db.createObjectStore('history', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('notes')) {
-        db.createObjectStore('notes', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('bookmarks')) {
-        db.createObjectStore('bookmarks', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('highlights')) {
-        db.createObjectStore('highlights', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('cache')) {
-        db.createObjectStore('cache', { keyPath: 'id' });
-      }
-    };
+      request.onupgradeneeded = (event: any) => {
+        const db = event.target.result as IDBDatabase;
+        const transaction = event.target.transaction as IDBTransaction;
+        
+        const stores = ['translations', 'history', 'notes', 'bookmarks', 'highlights', 'cache'];
+        for (const store of stores) {
+            if (!db.objectStoreNames.contains(store)) {
+                db.createObjectStore(store, { keyPath: 'id' });
+            } else {
+                const existingStore = transaction.objectStore(store);
+                // If it lacks key path or the key path is incorrect, drop and recreate
+                if (existingStore.keyPath !== 'id') {
+                    db.deleteObjectStore(store);
+                    db.createObjectStore(store, { keyPath: 'id' });
+                }
+            }
+        }
+      };
+    } catch (e) {
+      reject(e);
+    }
   });
 };
 

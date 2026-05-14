@@ -27,96 +27,31 @@ async function callAIEndpoint(prompt: string, systemMessage: string, temperature
   
   while (attempts < maxAttempts) {
     try {
-      let dataText = '';
+      const apiKey = config.apiKey || import.meta.env.VITE_GEMINI_API_KEY;
 
-      if (config.provider === 'google') {
-          // You must secure the API Key. For this electron/browser local app, it's ok.
-          const apiKey = config.apiKey || import.meta.env.VITE_GEMINI_API_KEY;
-          if (!apiKey) throw new Error("Gemini API key is required");
-          
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.model || 'gemini-3.1-pro-preview'}:generateContent?key=${apiKey}`;
-          const res = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt }] }],
-                  systemInstruction: { parts: [{ text: finalSystemMessage }] },
-                  generationConfig: { temperature: temperature }
-              })
-          });
-          if (!res.ok) throw new Error(`Google API Error: ${res.status} ${await res.text()}`);
-          const data = await res.json();
-          dataText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      } 
-      else if (config.provider === 'openai') {
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${config.apiKey}`
-              },
-              body: JSON.stringify({
-                  model: config.model || "gpt-4o",
-                  messages: [
-                      { role: "system", content: finalSystemMessage },
-                      { role: "user", content: prompt }
-                  ],
-                  temperature: temperature,
-              })
-          });
-          if (!res.ok) throw new Error(`OpenAI API Error: ${res.status} ${await res.text()}`);
-          const data = await res.json();
-          dataText = data.choices?.[0]?.message?.content || '';
-      }
-      else if (config.provider === 'anthropic') {
-          const res = await fetch("https://api.anthropic.com/v1/messages", {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'x-api-key': config.apiKey,
-                  'anthropic-version': '2023-06-01',
-                  'anthropic-dangerous-direct-browser-access': 'true'
-              },
-              body: JSON.stringify({
-                  model: config.model || "claude-3-5-sonnet-20240620",
-                  system: finalSystemMessage,
-                  messages: [
-                      { role: "user", content: prompt }
-                  ],
-                  max_tokens: 4096,
-                  temperature: temperature,
-              })
-          });
-          if (!res.ok) throw new Error(`Anthropic API Error: ${res.status} ${await res.text()}`);
-          const data = await res.json();
-          dataText = data.content?.[0]?.text || '';
-      }
-      else if (config.provider === 'deepseek') {
-          const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${config.apiKey}`
-              },
-              body: JSON.stringify({
-                  model: config.model || "deepseek-chat",
-                  messages: [
-                      { role: "system", content: finalSystemMessage },
-                      { role: "user", content: prompt }
-                  ],
-                  temperature: temperature,
-              })
-          });
-          if (!res.ok) throw new Error(`DeepSeek API Error: ${res.status} ${await res.text()}`);
-          const data = await res.json();
-          dataText = data.choices?.[0]?.message?.content || '';
-      }
+      const res = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+              provider: config.provider,
+              model: config.model,
+              systemMessage: finalSystemMessage,
+              prompt: prompt,
+              apiKey: apiKey,
+              temperature: temperature
+          })
+      });
 
-      return dataText;
+      if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Backend API Error: ${res.status}`);
+      }
+      const data = await res.json();
+      return data.text || '';
 
     } catch (err: any) {
       const errStr = err.message || err.toString();
-      const isRateLimitOrOverload = errStr.includes("429") || errStr.includes("quota") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("503") || errStr.includes("high demand");
+      const isRateLimitOrOverload = errStr.includes("429") || errStr.includes("quota") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("503") || errStr.includes("high demand") || errStr.includes("Rate exceeded");
       
       attempts++;
       

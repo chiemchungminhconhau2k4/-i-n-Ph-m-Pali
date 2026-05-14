@@ -23,7 +23,8 @@
     },
     "files": [
       "dist/**/*",
-      "main.cjs"
+      "main.cjs",
+      "node_modules/**/*"
     ]
   },
   "dependencies": {
