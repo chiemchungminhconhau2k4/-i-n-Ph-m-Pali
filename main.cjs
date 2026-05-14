@@ -24,26 +24,36 @@ function createWindow() {
   } else {
     // Start the express server from dist/server.cjs
     try {
-       require(path.join(__dirname, 'dist', 'server.cjs'));
-       console.log('Started local server from dist/server.cjs');
+       const serverModule = require(path.join(__dirname, 'dist', 'server.cjs'));
+       
+       const loadWithRetry = (url, retries = 5) => {
+          win.loadURL(url).catch((err) => {
+             if (retries > 0) {
+                console.log(`Failed to load ${url}, retrying in 500ms...`);
+                setTimeout(() => loadWithRetry(url, retries - 1), 500);
+             } else {
+                console.error("Failed to load local server:", err);
+             }
+          });
+       };
+
+       if (serverModule && typeof serverModule.startServer === 'function') {
+           // Pass 0 so the OS automatically assigns a free port. This prevents any EADDRINUSE errors.
+           serverModule.startServer(0).then((assignedPort) => {
+               console.log('Started local server on port ' + assignedPort);
+               setTimeout(() => loadWithRetry(`http://localhost:${assignedPort}`), 200);
+           }).catch((err) => {
+               console.error("Failed to start server dynamically", err);
+               // Even on failure, might have loaded on default port if some error occurred during fallback
+               setTimeout(() => loadWithRetry('http://localhost:3000'), 500);
+           });
+       } else {
+           console.log('Started local server from dist/server.cjs (legacy mode)');
+           setTimeout(() => loadWithRetry('http://localhost:3000'), 500);
+       }
     } catch (e) {
        console.error("Could not start server.cjs", e);
     }
-    
-    // Check if index.html exists but load from local server to allow API routes to work
-    // Add retry logic because the server may take a few ms to start listening 
-    const loadWithRetry = (url, retries = 5) => {
-       win.loadURL(url).catch((err) => {
-          if (retries > 0) {
-             console.log(`Failed to load ${url}, retrying in 500ms...`);
-             setTimeout(() => loadWithRetry(url, retries - 1), 500);
-          } else {
-             console.error("Failed to load local server:", err);
-          }
-       });
-    };
-    
-    setTimeout(() => loadWithRetry('http://localhost:3000'), 500);
   }
 }
 

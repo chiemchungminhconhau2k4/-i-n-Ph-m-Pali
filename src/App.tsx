@@ -877,10 +877,8 @@ export default function App() {
                    
                    {/* PDF Download Dropdown */}
                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                         <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:bg-[#FFFFF0]/10" title="Tải xuống PDF">
-                            <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
-                         </Button>
+                      <DropdownMenuTrigger className="h-8 w-8 sm:h-9 sm:w-8 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-black/5 dark:hover:bg-[#FFFFF0]/10 border-0 bg-transparent ring-0 focus:ring-0 outline-none transition-colors" title="Tải xuống PDF">
+                          <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 bg-white/95 dark:bg-transparent backdrop-blur-xl">
                          <DropdownMenuItem onClick={() => handleDownloadPDF('original')} className="cursor-pointer">

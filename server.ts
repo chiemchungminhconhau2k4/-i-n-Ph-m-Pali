@@ -9,9 +9,9 @@ import Anthropic from "@anthropic-ai/sdk";
 const asyncHandler = (fn: any) => (req: any, res: any, next: any) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-async function startServer() {
+export async function startServer(basePort = 3000): Promise<number> {
   const app = express();
-  const PORT = 3000;
+  const PORT = basePort;
 
   app.use(express.json({ limit: '50mb' }));
 
@@ -293,9 +293,32 @@ async function startServer() {
     res.status(500).json({ error: 'Internal Server Error' });
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  return new Promise((resolve, reject) => {
+    const host = process.versions?.electron ? "127.0.0.1" : "0.0.0.0";
+    const server = app.listen(PORT, host, () => {
+      const assignedPort = (server.address() as any)?.port || PORT;
+      console.log(`Server running on http://${host}:${assignedPort}`);
+      resolve(assignedPort);
+    });
+
+    server.on('error', (e: any) => {
+      if (e.code === 'EADDRINUSE') {
+        console.warn(`Port ${PORT} is in use on ${host}.`);
+        if (process.versions?.electron) {
+          console.log(`Trying free port (0)`);
+          startServer(0).then(resolve).catch(reject);
+        } else {
+          // If we're strictly in AI Studio dev, we must stick to 3000 but it would fail here
+          reject(e);
+        }
+      } else {
+        reject(e);
+      }
+    });
   });
 }
 
-startServer().catch(console.error);
+// Automatically start the server if not explicitly run inside Electron's main process
+if (!process.versions?.electron) {
+  startServer(3000).catch(console.error);
+}
