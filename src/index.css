@@ -211,6 +211,14 @@
     @apply border-t border-[#1E3A8A]/20 dark:border-[#FFFFF0]/20 my-6;
   }
 
+  .pdf-original-text,
+  .pdf-translated-part {
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    max-width: 100%;
+  }
+
   /* Refined Scrollbars */
   ::-webkit-scrollbar {
     width: 6px;

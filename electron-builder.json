@@ -7,6 +7,9 @@
   "win": {
     "target": "nsis"
   },
+  "nsis": {
+    "deleteAppDataOnUninstall": true
+  },
   "files": [
     "dist/**/*",
     "main.cjs",

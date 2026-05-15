@@ -26,6 +26,7 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useTheme } from 'next-themes';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { usePersistentState } from './hooks/usePersistentState';
 
 const TreeNode: React.FC<{
   node: PaliNode;
@@ -232,13 +233,13 @@ export default function App() {
   const { theme, setTheme } = useTheme();
   
   // Script selection
-  const [script, setScript] = useState('romn');
+  const [script, setScript] = usePersistentState('tipitaka-script', 'romn');
   
   // UI Layout State
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(300);
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = usePersistentState('tipitaka-left-panel-open', true);
+  const [isRightPanelOpen, setIsRightPanelOpen] = usePersistentState('tipitaka-right-panel-open', true);
+  const [leftPanelWidth, setLeftPanelWidth] = usePersistentState('tipitaka-left-panel-width', 300);
   const [isResizingLeftSidebar, setIsResizingLeftSidebar] = useState(false);
 
   useEffect(() => {
@@ -380,7 +381,7 @@ export default function App() {
   }, [documentContent, targetSearchMatch]);
 
   // Reader Settings State
-  const [readerFontSize, setReaderFontSize] = useState(20);
+  const [readerFontSize, setReaderFontSize] = usePersistentState('tipitaka-reader-font-size', 20);
   const [bookmarks, setBookmarks] = useState<any[]>([]); // We need to import IDBBookmark or cast it, wait, we don't need to change imports if we just use `any[]` for now, but let's change to `any[]` and use the actual object. Wait, `any[]` is already there. Let me just update the uses.
   const [documentNotes, setDocumentNotes] = useState<Record<number, string>>({});
   const [documentHighlights, setDocumentHighlights] = useState<Record<number, boolean>>({});
@@ -405,10 +406,10 @@ export default function App() {
   const [activeTranslateIndex, setActiveTranslateIndex] = useState<number>(-1);
 
   // Tools Panel State (Translation/Dictionary/Bookmarks/Settings)
-  const [activeTab, setActiveTab] = useState('translation');
+  const [activeTab, setActiveTab] = usePersistentState('tipitaka-active-tab', 'translation');
   
   // Translation
-  const [translationMode, setTranslationMode] = useState<TranslationMode>('line-by-line');
+  const [translationMode, setTranslationMode] = usePersistentState<TranslationMode>('tipitaka-translation-mode', 'line-by-line');
   const [translationResult, setTranslationResult] = useState<string>('');
   const [isTranslating, setIsTranslating] = useState(false);
 
@@ -699,8 +700,8 @@ export default function App() {
     let opt = {
       margin:       [0.5, 0.5, 0.5, 0.5],
       filename:     `${title}-${mode}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true },
+      image:        { type: 'jpeg', quality: 0.95 },
+      html2canvas:  { scale: 1.25, useCORS: true, logging: false },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
     
@@ -1036,7 +1037,7 @@ export default function App() {
             <>
               <div className="flex flex-row items-center justify-between py-4 px-6 md:px-10 border-b border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 shrink-0 sticky top-0 glass-panel z-10">
                 <div className="flex-1 min-w-0 pr-4">
-                  <h2 className="font-serif font-bold text-2xl text-[#1E3A8A] dark:text-[#FFFFF0] truncate">
+                  <h2 className="font-serif font-bold text-xl sm:text-2xl text-[#1E3A8A] dark:text-[#FFFFF0] line-clamp-2 leading-tight">
                     {displayTitle}
                   </h2>
                 </div>
