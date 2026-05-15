@@ -139,6 +139,19 @@
     }
   }
 
+  @keyframes loading-dots {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-4px);
+    }
+  }
+
+  .animate-dots {
+    animation: loading-dots 1s infinite ease-in-out;
+  }
+
   .glass-panel {
     @apply bg-white/70 dark:bg-[#313338]/90 backdrop-blur-3xl border border-white/20 dark:border-[#FFFFF0]/10 shadow-[0_8px_32px_0_rgba(30,58,138,0.05)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.2)];
   }

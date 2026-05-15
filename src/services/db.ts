@@ -9,7 +9,7 @@ export interface IDBTranslation {
 
 export interface IDBHistory {
   id: string; 
-  type: 'chat' | 'translate' | 'lookup' | 'read';
+  type: 'chat' | 'translate' | 'lookup' | 'read' | 'download';
   title?: string;
   detail?: string;
   data?: any;
@@ -33,6 +33,8 @@ export interface IDBBookmark {
   title: string;
   timestamp: number;
   node: any;
+  progress?: number;
+  difficulty?: number; // 1-5
 }
 
 let dbInstance: IDBDatabase | null = null;
@@ -226,6 +228,26 @@ export const toggleBookmark = async (id: string, title: string, node: any): Prom
             }
         };
         getRequest.onerror = () => reject(getRequest.error);
+    });
+};
+
+export const updateBookmarkMeta = async (id: string, updates: Partial<IDBBookmark>): Promise<void> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction('bookmarks', 'readwrite');
+        const store = transaction.objectStore('bookmarks');
+        const request = store.get(String(id));
+        request.onsuccess = () => {
+            if (request.result) {
+                const updated = { ...request.result, ...updates };
+                const putReq = store.put(updated);
+                putReq.onsuccess = () => resolve();
+                putReq.onerror = () => reject(putReq.error);
+            } else {
+                resolve(); // if not found, ignore
+            }
+        };
+        request.onerror = () => reject(request.error);
     });
 };
 

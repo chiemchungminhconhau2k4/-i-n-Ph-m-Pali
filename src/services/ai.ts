@@ -83,7 +83,7 @@ Mỗi đoạn/câu Pali phải được theo ngay sau bởi một dòng dịch t
 Văn bản cần dịch:
 ${text}`;
   } else if (mode === 'summary') {
-    prompt = `Hãy đọc đoạn văn bản Pali dưới đây và đưa ra một bản dịch tóm tắt ý chính của đoạn văn bản này sang tiếng Việt. Giọng văn trang trọng, chuẩn xác theo thuật ngữ Phật giáo.\n\nVăn bản:\n${text}`;
+    prompt = `Hãy đọc đoạn văn bản Pali dưới đây và đưa ra một bản dịch tóm tắt ý chính của đoạn văn bản này sang tiếng Việt. Giọng văn trang trọng, chuẩn xác theo thuật ngữ Phật giáo. YÊU CẦU: Chỉ trình bày mang tính chất liệt kê ngắn gọn thông qua các bullets số hoặc gạch đầu dòng các ý chính được đề cập trong nội dung tài liệu.\n\nVăn bản:\n${text}`;
   } else if (mode === 'vocabulary') {
     prompt = `Hãy phân tích các từ vựng Pali quan trọng xuất hiện trong đoạn văn bản sau, giải nghĩa từng từ sang tiếng Việt, phân tích từ nguyên (nếu cần) và chỉ ra ngữ pháp của từ đó.\n\nVăn bản:\n${text}`;
   }
@@ -98,17 +98,18 @@ ${text}`;
 }
 
 export async function lookupVocabulary(word: string, context: string, config: AIConfig = defaultAIConfig): Promise<string> {
-  const prompt = `Người dùng cần tra cứu từ vựng: "${word}" trong ngữ cảnh: "${context.substring(0, 500)}...".
-Hãy phân tích chi tiết:
-1. Từ vựng gốc: ${word}
-2. Ngữ nguyên học (Etymology): Phân tích tiền tố, từ căn, tiếp vĩ ngữ cấu tạo nên từ.
-3. Phân tích nghĩa khi ghép các thành tố.
-4. Nghĩa tiếng Việt tương đương.
-5. Ví dụ minh họa nghĩa (trong 1-2 ngữ cảnh khác).
-Trình bày rõ ràng, tao nhã bằng Markdown.`;
+  const prompt = `Bạn là một từ điển bách khoa Pāḷi chuyên nghiệp, đa chiều và khoa học. Yêu cầu phân tích chi tiết từ vựng Pāḷi: "${word}" dựa trên ngữ cảnh: "${context.substring(0, 500)}...".
+
+Vui lòng trình bày theo cấu trúc khoa học sau một cách tường minh, trực quan và sang trọng bằng Markdown, có sử dụng các biểu tượng phù hợp. LƯU Ý: Tránh sử dụng gạch đầu dòng (bullets) quá đà gây mất thẩm mỹ, thay vào đó hãy trình bày bằng văn xuôi gãy gọn trong mỗi mục:
+
+1. 🎯 **Định nghĩa tổng quan (Nghĩa cốt lõi)**
+2. 🔬 **Phân tích hình thái & Từ nguyên (Etymology & Morphology)** (Cách cấu tạo từ, chia thì, chia cách, tiền tố, từ căn, hậu tố...)
+3. 📚 **Tính đa nghĩa & Đa dụng (Polysemy & Usage)** (Các nét nghĩa khác nhau trong những ngữ cảnh khác nhau của Tipitaka, Atthakatha...)
+4. 🧠 **Hàm ý triết học / Đạo lý (Philosophical / Doctrinal Implications)** (Ý nghĩa sâu xa trong ngữ cảnh tu tập, giáo lý)
+5. 📖 **Ví dụ minh họa (Examples)** (Tối thiểu 1 ví dụ trích dẫn điển hình khác nếu có)`;
   
   try {
-    const textResult = await callAIEndpoint(prompt, "Bạn là Trợ lý AI Phật học Pāli tao nhã, uyên bác và tinh tế.", 0.2, config);
+    const textResult = await callAIEndpoint(prompt, "Bạn là Trợ lý AI Phật học Pāli tao nhã, uyên bác, phân tích khoa học đa chiều và tinh tế.", 0.2, config);
     return textResult || '';
   } catch (error: any) {
     console.error("AI API Error:", error);
@@ -118,10 +119,22 @@ Trình bày rõ ràng, tao nhã bằng Markdown.`;
 
 export async function chatWithAI(question: string, context: string = '', history: any[] = [], config: AIConfig = defaultAIConfig): Promise<string> {
   let formattedHistory = history.map(h => `${h.role === 'user' ? 'Người dùng' : 'Trợ lý AI'}: ${h.content}`).join('\n\n');
-  let prompt = `Bạn là Trợ lý AI Phật học Pāli tao nhã, uyên bác và tinh tế. Trả lời các câu hỏi về Phật học, tiếng Pāli, và Tam Tạng một cách trang trọng, từ bi và chính xác.\n\n${context ? `\n\n=== NGỮ CẢNH VĂN BẢN ĐANG ĐỌC CHUYÊN SÂU ===\n${context.substring(0, 5000)}\n====================================` : ''}\n\n=== LỊCH SỬ TRÒ CHUYỆN ===\n${formattedHistory}\n==========================\n\nNgười dùng hiện tại: ${question}`;
+  const systemPrompt = `Bạn là Trợ lý AI Phật học Pāli tao nhã, uyên bác và tinh tế. Bạn trả lời các câu hỏi bằng cấu trúc khoa học, trực quan, giải thích dễ hiểu, phân tích đa tầng nghĩa, đa khía cạnh để giúp người dùng có thể nắm bắt ý nghĩa sâu sắc. CẤM lai tạp văn phong ngoại đạo, phải thấm nhuần tinh hoa Theravāda. Thông tin phải bám sát Tam Tạng (Tipiṭaka), Chú giải (Aṭṭhakathā) và Phụ chú giải (Ṭīkā).
+
+Kết thúc phần trả lời, bạn BẮT BUỘC PHẢI đưa ra đúng 3 câu hỏi gợi ý mở rộng nằm ở cuối cùng, dùng để hỏi sâu hơn về khía cạnh Pháp học hoặc chủ đề liên quan. 
+Sử dụng chính xác định dạng sau (không giải thích thêm):
+
+---SUGGESTIONS---
+1. [Câu hỏi gợi ý 1]
+2. [Câu hỏi gợi ý 2]
+3. [Câu hỏi gợi ý 3]`;
+
+  let prompt = `Trả lời câu hỏi sau bằng cấu trúc phân tích đa tầng (VD: 1. Ý nghĩa căn bản -> 2. Khía cạnh chuyên sâu / Vi diệu pháp -> 3. Ứng dụng thực tiễn / Tu tập). Dùng Markdown để trình bày. LƯU Ý TRỌNG TÂM: Trình bày nội dung bằng văn xuôi nằm gọn trong các đề mục phân tích được đánh số 1, 2, 3, 4 một cách mô phạm, trôi chảy. Khuyến khích viết thành các đoạn văn mạch lạc thay vì dùng quá nhiều gạch đầu dòng (bullets).
+  
+${context ? `\n=== NGỮ CẢNH VĂN BẢN ĐANG ĐỌC CHUYÊN SÂU ===\n${context.substring(0, 5000)}\n====================================` : ''}\n\n=== LỊCH SỬ TRÒ CHUYỆN ===\n${formattedHistory}\n==========================\n\nNgười dùng hiện tại: ${question}`;
   
   try {
-    const textResult = await callAIEndpoint(prompt, SYSTEM_INSTRUCTION, 0.4, config);
+    const textResult = await callAIEndpoint(prompt, systemPrompt, 0.4, config);
     return textResult || '';
   } catch (error: any) {
     console.error("AI API Error in chat:", error);

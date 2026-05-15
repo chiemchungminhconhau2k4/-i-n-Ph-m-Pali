@@ -1,0 +1,15 @@
+{
+  "appId": "com.dienpham.pali",
+  "productName": "Điển Phạm Pāḷi",
+  "directories": {
+    "output": "dist_electron"
+  },
+  "win": {
+    "target": "nsis"
+  },
+  "files": [
+    "dist/**/*",
+    "main.cjs",
+    "node_modules/**/*"
+  ]
+}

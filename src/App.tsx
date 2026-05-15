@@ -4,7 +4,7 @@ import {
   Languages, Loader2, Sun, Moon, MessageCircle, Send, Sparkles, RotateCcw,
   PanelRightClose, PanelRightOpen, Cpu, Globe, PanelLeftClose, PanelLeftOpen, 
   ZoomIn, ZoomOut, Bookmark, BookMarked, BookmarkPlus, Trash2, Library, Compass, Check, Search, History, Clock, PenLine, Edit3,
-  Highlighter, Download
+  Highlighter, Download, Eye, EyeOff, RefreshCw, Save
 } from 'lucide-react';
 import { PaliNode, TranslationMode } from './data/paliTree';
 import { translatePali, chatWithAI, lookupVocabulary, AIConfig, defaultAIConfig } from './services/ai';
@@ -13,7 +13,7 @@ import {
   saveTranslation, getTranslation, 
   saveHistory, getHistory, getBookmarks, toggleBookmark as dbToggleBookmark, 
   saveNote, getNotesByDoc, deleteNote, IDBHistory, IDBNote,
-  saveHighlight, deleteHighlight, getHighlightsByDoc
+  saveHighlight, deleteHighlight, getHighlightsByDoc, updateBookmarkMeta
 } from './services/db';
 import html2pdf from 'html2pdf.js';
 import { Button } from '@/components/ui/button';
@@ -32,8 +32,9 @@ const TreeNode: React.FC<{
   level?: number;
   onSelect: (node: PaliNode) => void;
   selectedId: string | number | null;
-}> = ({ node, level = 0, onSelect, selectedId }) => {
-  const [isOpen, setIsOpen] = useState(false);
+  isRootLevel?: boolean;
+}> = ({ node, level = 0, onSelect, selectedId, isRootLevel = false }) => {
+  const [isOpen, setIsOpen] = useState(isRootLevel);
   const isSelected = selectedId === node.id || (node.a_attr?.href && selectedId === node.a_attr.href);
   const isFolder = node.children && node.children.length > 0;
 
@@ -45,7 +46,74 @@ const TreeNode: React.FC<{
     }
   };
 
-  const displayText = node.text || node.name || "Untitled";
+  const rawText = node.text || node.name || "Untitled";
+  const formatTextAsTitle = (text: string) => {
+    return text.toLowerCase().split(/([\s-])/).map(part => {
+      if (!part) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    }).join('');
+  };
+  
+  let displayText = formatTextAsTitle(rawText);
+  if (isRootLevel) {
+     displayText = rawText === 'Tipiṭaka' ? 'THÁNH TẠNG' : rawText.toUpperCase();
+  } else if (level === 0) {
+     displayText = rawText.toUpperCase();
+  }
+
+  let textClassName = "";
+  if (level === 0) {
+     textClassName = "font-bold uppercase not-italic tracking-wide";
+  } else if (level === 1) {
+     textClassName = "font-bold italic";
+  } else if (level === 2) {
+     textClassName = "font-normal italic";
+  } else {
+     textClassName = "font-normal not-italic text-[13px]";
+  }
+
+  if (isRootLevel) {
+     return (
+        <div className="select-none mb-3">
+          <div 
+            onClick={handleClick}
+            className={`
+              flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl cursor-pointer transition-all duration-500 relative overflow-hidden group
+              ${isOpen 
+                 ? 'bg-gradient-to-br from-[#1E3A8A]/10 to-[#1E3A8A]/5 dark:from-[#FFFFF0]/10 dark:to-transparent border border-[#1E3A8A]/30 dark:border-[#FFFFF0]/30 shadow-lg' 
+                 : 'bg-white/50 dark:bg-transparent border border-[#1E3A8A]/10 dark:border-[#FFFFF0]/10 hover:border-[#1E3A8A]/30 dark:hover:border-[#FFFFF0]/30 hover:shadow-md'
+              }
+            `}
+          >
+             <div className="absolute top-0 left-0 w-1 h-full bg-[#1E3A8A] dark:bg-[#FFFFF0] opacity-0 group-hover:opacity-100 transition-opacity" />
+             <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-xl bg-white dark:bg-[#FFFFF0]/5 shadow-sm border border-[#1E3A8A]/10 dark:border-transparent transition-transform duration-500 ${isOpen ? 'rotate-12 scale-110' : 'group-hover:scale-110'}`}>
+                    <Library className="w-5 h-5 text-[#1E3A8A] dark:text-[#FFFFF0]" />
+                </div>
+                <span className={`text-sm sm:text-base ${isOpen ? 'text-[#1E3A8A] dark:text-[#FFFFF0]' : 'text-[#1E3A8A]/80 dark:text-[#FFFFF0]/80'} font-bold uppercase not-italic tracking-widest`}>
+                   {displayText}
+                </span>
+             </div>
+             <div>
+                {isOpen ? <ChevronDown className="w-5 h-5 text-[#1E3A8A]/50 dark:text-[#FFFFF0]/50" /> : <ChevronRight className="w-5 h-5 text-[#1E3A8A]/50 dark:text-[#FFFFF0]/50" />}
+             </div>
+          </div>
+          {isOpen && node.children && (
+            <div className="mt-2 pl-2 border-l-2 border-[#1E3A8A]/10 dark:border-[#FFFFF0]/10 ml-6 flex flex-col space-y-1">
+              {node.children.map((child, idx) => (
+                <TreeNode 
+                  key={child.id || idx} 
+                  node={child} 
+                  level={0} 
+                  onSelect={onSelect} 
+                  selectedId={selectedId} 
+                />
+              ))}
+            </div>
+          )}
+        </div>
+     );
+  }
 
   return (
     <div className="select-none">
@@ -61,7 +129,7 @@ const TreeNode: React.FC<{
         ) : (
           <FileText className={`w-3.5 h-3.5 shrink-0 transition-transform duration-300 ${isSelected ? 'text-[#1E3A8A] dark:text-[#FFFFF0] scale-110' : 'text-[#1E3A8A] dark:text-[#FFFFF0]'}`} />
         )}
-        <span className="truncate leading-relaxed">{displayText}</span>
+        <span className={`break-words whitespace-normal leading-relaxed ${textClassName}`}>{displayText}</span>
       </div>
       {isFolder && isOpen && node.children && (
         <div className="flex flex-col mt-0.5">
@@ -142,7 +210,7 @@ const ParsedTranslatedBlock: React.FC<{
         if (part.startsWith('<strong><em>') && part.endsWith('</em></strong>')) {
           const vietText = part.replace(/<\/?strong>/g, '').replace(/<\/?em>/g, '');
           return (
-            <div key={index} className="font-bold italic text-[#1E3A8A] dark:text-[#FFFFF0] mt-1 mb-5 font-sans leading-[1.8]" style={{ fontSize: `${Math.max(14, fontSize - 2)}px` }}>
+            <div key={index} className="pdf-translated-part font-bold italic text-[#1E3A8A] dark:text-[#FFFFF0] mt-1 mb-5 font-sans leading-[1.8]" style={{ fontSize: `${Math.max(14, fontSize - 2)}px` }}>
               {vietText}
             </div>
           );
@@ -150,7 +218,7 @@ const ParsedTranslatedBlock: React.FC<{
           const paliText = part.trim();
           if (!paliText) return null;
           return (
-            <div key={index} className="mb-0">
+            <div key={index} className="pdf-original-part mb-0">
               <ClickableText text={paliText} isActive={true} onWordClick={onWordClick} fontSize={fontSize} highlightWord={highlightWord} />
             </div>
           );
@@ -170,6 +238,37 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(300);
+  const [isResizingLeftSidebar, setIsResizingLeftSidebar] = useState(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingLeftSidebar) return;
+      let newWidth = e.clientX;
+      if (newWidth < 250) newWidth = 250;
+      if (newWidth > 600) newWidth = 600;
+      setLeftPanelWidth(newWidth);
+    };
+    
+    const handleMouseUp = () => {
+      setIsResizingLeftSidebar(false);
+    };
+
+    if (isResizingLeftSidebar) {
+      document.body.style.userSelect = 'none'; // Prevent text selection
+      document.body.style.cursor = 'col-resize';
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    } else {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingLeftSidebar]);
   
   // Document State
   const [treeData, setTreeData] = useState<PaliNode[]>([]);
@@ -262,9 +361,18 @@ export default function App() {
   useEffect(() => {
      if (targetSearchMatch && documentContent) {
         const t = setTimeout(() => {
-            const el = document.querySelector('[data-search-match="true"]');
+            let el = document.querySelector('[data-search-match="true"]');
+            if (!el) {
+                const paras = documentContent.split(/\n\s*\n/).filter(p => p.trim() !== '');
+                const matchIdx = paras.findIndex(p => p.toLowerCase().includes(targetSearchMatch.toLowerCase()));
+                if (matchIdx !== -1) {
+                    el = document.getElementById(`para-${matchIdx}`);
+                }
+            }
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Reset search match so we don't stick on this if we re-visit the page
+                // We shouldn't clear here because re-renders might lose highlight, but it's okay for now.
             }
         }, 500);
         return () => clearTimeout(t);
@@ -273,7 +381,7 @@ export default function App() {
 
   // Reader Settings State
   const [readerFontSize, setReaderFontSize] = useState(20);
-  const [bookmarks, setBookmarks] = useState<any[]>([]);
+  const [bookmarks, setBookmarks] = useState<any[]>([]); // We need to import IDBBookmark or cast it, wait, we don't need to change imports if we just use `any[]` for now, but let's change to `any[]` and use the actual object. Wait, `any[]` is already there. Let me just update the uses.
   const [documentNotes, setDocumentNotes] = useState<Record<number, string>>({});
   const [documentHighlights, setDocumentHighlights] = useState<Record<number, boolean>>({});
   const [activeNoteEditIndex, setActiveNoteEditIndex] = useState<number | null>(null);
@@ -281,11 +389,19 @@ export default function App() {
   const [historyList, setHistoryList] = useState<IDBHistory[]>([]);
   
   // AI Config State
-  const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
-  const [draftAiConfig, setDraftAiConfig] = useState<AIConfig>(defaultAIConfig);
+  const getInitialAiConfig = () => {
+    const saved = localStorage.getItem('tipitaka-ai-config');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return defaultAIConfig;
+  };
+  const [aiConfig, setAiConfig] = useState<AIConfig>(getInitialAiConfig);
+  const [draftAiConfig, setDraftAiConfig] = useState<AIConfig>(getInitialAiConfig);
   const [isAiConfigSaved, setIsAiConfigSaved] = useState(false);
 
   const [inlineTranslations, setInlineTranslations] = useState<Record<number, string>>({});
+  const [hiddenTranslations, setHiddenTranslations] = useState<Record<number, boolean>>({});
   const [activeTranslateIndex, setActiveTranslateIndex] = useState<number>(-1);
 
   // Tools Panel State (Translation/Dictionary/Bookmarks/Settings)
@@ -307,6 +423,9 @@ export default function App() {
   const [isChatting, setIsChatting] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
+  const [isPdfDownloading, setIsPdfDownloading] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState(0);
+
   // Fetch Tree
   useEffect(() => {
     setIsTreeLoading(true);
@@ -323,19 +442,8 @@ export default function App() {
 
   // Hydrate states from local storage
   useEffect(() => {
-    const savedConfig = localStorage.getItem('tipitaka-ai-config');
-    if (savedConfig) {
-      try { 
-        const parsed = JSON.parse(savedConfig);
-        setAiConfig(parsed); 
-        setDraftAiConfig(parsed);
-      } catch (e) { }
-    }
-    
     // Fetch bookmarks from IDB
-    getBookmarks().then(bms => {
-       setBookmarks(bms.map(b => b.node));
-    });
+    getBookmarks().then(setBookmarks);
 
     // Fetch history
     getHistory().then(setHistoryList);
@@ -366,18 +474,25 @@ export default function App() {
     if (!id) return;
     const nowBookmarked = await dbToggleBookmark(id, selectedNode.text || selectedNode.name || 'Untitled', selectedNode);
     if (nowBookmarked) {
-        setBookmarks([...bookmarks, selectedNode]);
+        setBookmarks([...bookmarks, {
+           id: String(id),
+           title: selectedNode.text || selectedNode.name || 'Untitled',
+           timestamp: Date.now(),
+           node: selectedNode,
+           progress: 0,
+           difficulty: 0
+        }]);
     } else {
-        setBookmarks(bookmarks.filter(b => (b.id || b.a_attr?.href) !== id));
+        setBookmarks(bookmarks.filter(b => b.id !== String(id)));
     }
   };
 
-  const isBookmarked = selectedNode && bookmarks.some(b => (b.id || b.a_attr?.href) === (selectedNode.id || selectedNode.a_attr?.href));
+  const isBookmarked = selectedNode && bookmarks.some(b => b.id === String(selectedNode.id || selectedNode.a_attr?.href));
 
   const removeBookmark = async (id: string | number, e: React.MouseEvent) => {
     e.stopPropagation();
     await dbToggleBookmark(String(id), '', null); // this toggles it off
-    const newBookmarks = bookmarks.filter(b => (b.id || b.a_attr?.href) !== id);
+    const newBookmarks = bookmarks.filter(b => b.id !== String(id));
     setBookmarks(newBookmarks);
   };
 
@@ -392,6 +507,7 @@ export default function App() {
     setDocumentContent('');
     setTranslationResult('');
     setInlineTranslations({});
+    setHiddenTranslations({});
     setDocumentNotes({});
     setActiveTranslateIndex(-1);
     setIsMobileMenuOpen(false); 
@@ -459,12 +575,14 @@ export default function App() {
     loadDocumentContent(node, script);
   };
 
-  const translateParagraphBase = async (text: string, index: number, nodeHref: string) => {
+  const translateParagraphBase = async (text: string, index: number, nodeHref: string, forceRefetch: boolean = false) => {
       try {
-          const cached = await getTranslation(`${script}_${nodeHref}_para_${index}`);
-          if (cached) {
-             setInlineTranslations(prev => ({...prev, [index]: cached}));
-             return cached;
+          if (!forceRefetch) {
+              const cached = await getTranslation(`${script}_${nodeHref}_para_${index}`);
+              if (cached) {
+                 setInlineTranslations(prev => ({...prev, [index]: cached}));
+                 return cached;
+              }
           }
 
           const res = await translatePali(text + '\n\n', 'line-by-line', aiConfig);
@@ -540,15 +658,19 @@ export default function App() {
     if (!el || !selectedNode) return;
     const title = selectedNode.text || "Tai_Lieu_Pali";
     
+    setIsPdfDownloading(true);
+    setPdfProgress(10);
+
     // Create a temporary clone for modification and print formatting
     const clone = el.cloneNode(true) as HTMLElement;
     
     // Apply special classes depending on mode
     if (mode === 'original') {
         // Find and remove translated blocks
-        clone.querySelectorAll('.pdf-translation-text').forEach(n => n.remove());
+        clone.querySelectorAll('.pdf-translated-part').forEach(n => n.remove());
     } else if (mode === 'vietnamese') {
         // Find and remove original texts
+        clone.querySelectorAll('.pdf-original-part').forEach(n => n.remove());
         clone.querySelectorAll('.pdf-original-text').forEach(n => n.remove());
     }
     
@@ -556,11 +678,6 @@ export default function App() {
     clone.querySelectorAll('.flex.md\\:hidden.gap-3').forEach(n => n.remove());
     clone.querySelectorAll('.absolute.-left-12').forEach(n => n.remove());
 
-    // Basic styling for print
-    clone.style.padding = '20px 40px';
-    clone.style.background = '#ffffff';
-    clone.style.color = '#000000';
-    
     const container = document.createElement('div');
     const header = document.createElement('h1');
     header.innerText = title;
@@ -570,6 +687,14 @@ export default function App() {
     header.style.color = '#000000';
     container.appendChild(header);
     container.appendChild(clone);
+    
+    // Append to body temporarily so stylesheets apply to clone
+    container.className = "bg-white p-8 max-w-4xl mx-auto w-full";
+    container.style.position = "absolute";
+    container.style.left = "-9999px";
+    container.style.top = "0";
+    container.style.color = "#000000";
+    document.body.appendChild(container);
 
     let opt = {
       margin:       [0.5, 0.5, 0.5, 0.5],
@@ -578,18 +703,41 @@ export default function App() {
       html2canvas:  { scale: 2, useCORS: true },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
+    
+    setPdfProgress(40);
 
-    html2pdf().set(opt).from(container).save();
+    html2pdf().set(opt).from(container).toPdf().get('pdf').then(() => {
+        setPdfProgress(80);
+    }).save().then(async () => {
+        setPdfProgress(100);
+        await saveHistory('download', `Tải PDF: ${title}`, `Thành công (${mode})`, { mode, success: true });
+        const lst = await getHistory();
+        setHistoryList(lst);
+        setTimeout(() => {
+           setIsPdfDownloading(false);
+           setPdfProgress(0);
+           document.body.removeChild(container);
+           // Show success toast? Actually progress 100% is enough
+        }, 3000);
+    }).catch(async (e: any) => {
+        await saveHistory('download', `Tải PDF: ${title}`, `Thất bại (${mode})`, { mode, success: false });
+        const lst = await getHistory();
+        setHistoryList(lst);
+        setPdfProgress(0);
+        setIsPdfDownloading(false);
+        if(container.parentElement) document.body.removeChild(container);
+        alert(`Tải xuống PDF thất bại: ${e.message || 'Lỗi không xác định'}`);
+    });
   };
 
-  const handleTranslateSingle = async (index: number) => {
+  const handleTranslateSingle = async (index: number, forceRefetch: boolean = false) => {
       const blocks = documentContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
       const text = blocks[index];
       if (!text || !selectedNode) return;
       const nodeHref = selectedNode.a_attr?.href || String(selectedNode.id);
       
       setActiveTranslateIndex(index);
-      await translateParagraphBase(text, index, nodeHref);
+      await translateParagraphBase(text, index, nodeHref, forceRefetch);
       setActiveTranslateIndex(-1);
   };
 
@@ -652,9 +800,10 @@ export default function App() {
     }
   };
 
-  const handleSendChat = async () => {
-    if (!chatInput.trim()) return;
-    const userMsg = chatInput.trim();
+  const handleSendChat = async (overrideMsg?: string) => {
+    const messageToSend = overrideMsg || chatInput.trim();
+    if (!messageToSend) return;
+    const userMsg = messageToSend;
     setChatInput('');
     setChatMessages(prev => [...prev, {role: 'user', content: userMsg}]);
     setIsChatting(true);
@@ -674,20 +823,22 @@ export default function App() {
 
   const SidebarContent = (
     <div className="flex flex-col h-full bg-transparent dark:bg-transparent border-r border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30">
-      <div className="px-5 py-5 font-bold text-xs text-[#1E3A8A] dark:text-[#FFFFF0] uppercase tracking-widest flex items-center justify-between shrink-0 mb-2">
-        <span className="flex items-center gap-2"><BookOpen className="w-4 h-4 text-[#1E3A8A] dark:text-[#FFFFF0]" /> Thư Viện Điển Phạm Pali</span>
+      <div className="px-5 py-5 font-bold text-xs text-[#1E3A8A] dark:text-[#FFFFF0] flex flex-col justify-between shrink-0 mb-2 gap-1.5 border-b border-[#1E3A8A]/10 dark:border-[#FFFFF0]/10 pb-5">
+        <span className="flex items-center gap-2 uppercase tracking-widest"><BookOpen className="w-4 h-4 text-[#1E3A8A] dark:text-[#FFFFF0]" /> THƯ VIỆN THÁNH ĐIỂN</span>
+        <span className="italic font-serif text-[10px] text-[#1E3A8A]/80 dark:text-[#FFFFF0]/80 tracking-wide font-normal">Khảo cứu, Biện đàm, Giải phẫu & Xiển minh Phật học Theravāda</span>
       </div>
       <div className="flex-1 px-3 overflow-y-auto custom-scrollbar">
         <div className="pb-6 space-y-1">
           {isTreeLoading ? (
              <div className="flex justify-center p-8 text-[#1E3A8A] dark:text-[#FFFFF0]"><Loader2 className="w-6 h-6 animate-spin" /></div>
           ) : (
-            treeData.map((node, idx) => (
+            [{ id: 'master_root', text: 'THÁNH TẠNG', children: treeData }].map((node, idx) => (
               <TreeNode 
                 key={node.id || idx} 
-                node={node} 
+                node={node as PaliNode} 
                 onSelect={handleSelectNode} 
                 selectedId={selectedNode?.id || selectedNode?.a_attr?.href || null} 
+                isRootLevel={true}
               />
             ))
           )}
@@ -700,6 +851,22 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen h-[100dvh] bg-white dark:bg-transparent font-sans text-[#1E3A8A] dark:text-[#FFFFF0] overflow-hidden">
+      
+      {isPdfDownloading && (
+         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center">
+            <div className="bg-white dark:bg-[#1e1f22] p-8 rounded-2xl shadow-2xl flex flex-col items-center gap-4 w-[300px]">
+               <h3 className="text-lg font-bold text-[#1E3A8A] dark:text-[#FFFFF0]">Đang xuất PDF...</h3>
+               <div className="w-full h-2 bg-[#1E3A8A]/10 dark:bg-[#FFFFF0]/10 rounded-full overflow-hidden">
+                   <div 
+                       className="h-full bg-gradient-to-r from-blue-500 to-[#1E3A8A] transition-all duration-300"
+                       style={{ width: `${pdfProgress}%` }}
+                   />
+               </div>
+               <p className="text-sm text-[#1E3A8A]/70 dark:text-[#FFFFF0]/70">{pdfProgress < 100 ? `${pdfProgress}%` : 'Hoàn tất!'}</p>
+            </div>
+         </div>
+      )}
+
       {/* Top Navbar */}
       <header className="flex items-center justify-between px-5 h-16 border-b border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 glass-panel shrink-0 z-20 transition-all">
         <div className="flex items-center gap-3 sm:gap-4">
@@ -722,13 +889,15 @@ export default function App() {
           </Button>
 
           <div className="flex items-center gap-3 group cursor-pointer transition-transform duration-300 hover:scale-[1.02]">
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-[#1E3A8A] to-[#1E3A8A] dark:from-[#FFFFF0] dark:to-[#FFFFF0] shadow-[0_4px_16px_rgba(30,58,138,0.4)] dark:shadow-[0_4px_16px_rgba(255,255,240,0.4)] text-white dark:text-[#2b2d31] group-hover:shadow-[0_8px_24px_rgba(30,58,138,0.6)] dark:group-hover:shadow-[0_8px_24px_rgba(255,255,240,0.6)] transition-all duration-500">
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-[#1E3A8A] to-[#1E3A8A] dark:from-[#FFFFF0] dark:to-[#FFFFF0] shadow-[0_4px_16px_rgba(30,58,138,0.4)] dark:shadow-[0_4px_16px_rgba(255,255,240,0.4)] text-white dark:text-[#2b2d31] group-hover:shadow-[0_8px_24px_rgba(30,58,138,0.6)] dark:group-hover:shadow-[0_8px_24px_rgba(255,255,240,0.6)] transition-all duration-500 shrink-0">
                <Library className="w-5 h-5 relative z-10 transition-transform group-hover:rotate-12 duration-500" />
                <Sparkles className="w-3.5 h-3.5 absolute -bottom-1 -right-1 text-[#1E3A8A] dark:text-[#FFFFF0] opacity-90 animate-pulse" />
             </div>
-            <h1 className="font-serif font-bold text-[22px] tracking-wide text-[#1E3A8A] dark:text-[#FFFFF0] group-hover:text-[#1E3A8A] dark:group-hover:text-[#FFFFF0] transition-colors duration-300 uppercase">
-              ĐIỂN PHẠM PALI
-            </h1>
+            <div className="flex flex-col">
+              <h1 className="font-serif font-bold text-[18px] sm:text-[22px] tracking-wide text-[#1E3A8A] dark:text-[#FFFFF0] group-hover:text-[#1E3A8A] dark:group-hover:text-[#FFFFF0] transition-colors duration-300 uppercase leading-none">
+                ĐIỂN PHẠM PALI
+              </h1>
+            </div>
           </div>
         </div>
 
@@ -761,10 +930,6 @@ export default function App() {
                              if (result.type === 'document_title' && result.node) {
                                  handleSelectNode(result.node);
                                  setTargetSearchMatch(searchQuery);
-                                 setTimeout(() => {
-                                     const el = document.querySelector('[data-search-match="true"]');
-                                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                 }, 1000);
                              } else if (result.type === 'text_match' && result.paragraphIndex !== undefined && selectedNode) {
                                  handleSelectNode(selectedNode); // Ensure tabs or active states align
                                  setTargetSearchMatch(searchQuery);
@@ -773,7 +938,7 @@ export default function App() {
                                      if (el) {
                                          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                      }
-                                 }, 200);
+                                 }, 500); // 500ms since we might not need to refetch if node is already selected
                              }
                              setShowSearchResults(false);
                           }}
@@ -847,12 +1012,22 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* Left Sidebar */}
-        <div className={`hidden md:flex flex-col shrink-0 z-10 bg-transparent dark:bg-transparent border-r border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)]
-          ${isLeftPanelOpen ? 'w-[300px] translate-x-0' : 'w-0 border-none -translate-x-full opacity-0'}`}
+        <div style={{ width: isLeftPanelOpen ? leftPanelWidth : 0 }} className={`hidden md:flex flex-col shrink-0 z-10 bg-transparent dark:bg-transparent border-r border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 transition-all duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] relative
+          ${isLeftPanelOpen ? 'translate-x-0' : 'w-0 border-none -translate-x-full opacity-0'}`}
         >
-          <div className="w-[300px] h-full flex flex-col">
+          <div style={{ width: leftPanelWidth }} className="h-full flex flex-col overflow-hidden min-w-[250px]">
              {SidebarContent}
           </div>
+          
+          {/* Resize Handle */}
+          {isLeftPanelOpen && (
+             <div 
+               onMouseDown={() => setIsResizingLeftSidebar(true)}
+               className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-[#1E3A8A]/20 dark:hover:bg-[#FFFFF0]/20 z-20 flex flex-col justify-center items-center group/resizer"
+             >
+                <div className="h-10 w-0.5 bg-[#1E3A8A]/30 dark:bg-[#FFFFF0]/30 group-hover/resizer:bg-[#1E3A8A]/80 dark:group-hover/resizer:bg-[#FFFFF0]/80 rounded-full" />
+             </div>
+          )}
         </div>
 
         {/* Center Reader Area */}
@@ -869,7 +1044,25 @@ export default function App() {
                    <Button variant="ghost" size="icon" onClick={() => setReaderFontSize(f => Math.max(12, f - 2))} className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:text-[#FFFFF0] dark:hover:bg-[#FFFFF0]/10 transition-colors">
                        <ZoomOut className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                    </Button>
-                   <div className="text-sm font-semibold text-[#1E3A8A] dark:text-[#FFFFF0] w-6 sm:w-8 text-center select-none font-sans">{readerFontSize}</div>
+                   <input 
+                      type="number"
+                      value={readerFontSize}
+                      onChange={(e) => {
+                         let v = parseInt(e.target.value);
+                         if (!isNaN(v)) {
+                            // Only set if within reasonable bounds or if they are typing (like 1, 2) we might wait, but easy way is just set it
+                            setReaderFontSize(v);
+                         } else if (e.target.value === '') {
+                             // allow empty temp
+                             setReaderFontSize(0 as any); // hack for typing
+                         }
+                      }}
+                      onBlur={() => {
+                         if (readerFontSize < 12) setReaderFontSize(12);
+                         if (readerFontSize > 64) setReaderFontSize(64);
+                      }}
+                      className="text-sm font-semibold text-[#1E3A8A] dark:text-[#FFFFF0] bg-transparent w-8 sm:w-10 text-center select-all font-sans outline-none focus:bg-[#1E3A8A]/10 dark:focus:bg-[#FFFFF0]/10 rounded px-1 appearance-none [&::-webkit-inner-spin-button]:appearance-none m-0"
+                   />
                    <Button variant="ghost" size="icon" onClick={() => setReaderFontSize(f => Math.min(32, f + 2))} className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-white dark:hover:text-[#FFFFF0] dark:hover:bg-[#FFFFF0]/10 transition-colors">
                        <ZoomIn className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                    </Button>
@@ -877,10 +1070,10 @@ export default function App() {
                    
                    {/* PDF Download Dropdown */}
                    <DropdownMenu>
-                      <DropdownMenuTrigger className="h-8 w-8 sm:h-9 sm:w-8 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-black/5 dark:hover:bg-[#FFFFF0]/10 border-0 bg-transparent ring-0 focus:ring-0 outline-none transition-colors" title="Tải xuống PDF">
-                          <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+                      <DropdownMenuTrigger disabled={isPdfDownloading} className="min-w-[2rem] px-1 sm:h-9 rounded-xl flex items-center justify-center text-[#1E3A8A] dark:text-[#FFFFF0] hover:bg-black/5 dark:hover:bg-[#FFFFF0]/10 border-0 bg-transparent ring-0 focus:ring-0 outline-none transition-colors" title="Tải xuống PDF">
+                          {isPdfDownloading ? <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">{Math.round(pdfProgress)}%</span> : <Download className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />}
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 bg-white/95 dark:bg-transparent backdrop-blur-xl">
+                      <DropdownMenuContent align="end" className="border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 bg-white/95 dark:bg-transparent backdrop-blur-xl w-60">
                          <DropdownMenuItem onClick={() => handleDownloadPDF('original')} className="cursor-pointer">
                             {
                                script === 'romn' ? 'Roman' :
@@ -893,6 +1086,23 @@ export default function App() {
                          </DropdownMenuItem>
                          <DropdownMenuItem onClick={() => handleDownloadPDF('bilingual')} className="cursor-pointer">Song ngữ</DropdownMenuItem>
                          <DropdownMenuItem onClick={() => handleDownloadPDF('vietnamese')} className="cursor-pointer">Việt ngữ</DropdownMenuItem>
+                         
+                         {historyList.some(h => h.type === 'download') && (
+                            <>
+                              <div className="h-px bg-[#1E3A8A]/20 dark:bg-[#FFFFF0]/20 my-2" />
+                              <div className="px-2 py-1 text-[11px] font-semibold opacity-60 uppercase tracking-widest text-[#1E3A8A] dark:text-[#FFFFF0]">Lịch sử tải PDF (30 ngày)</div>
+                              <div className="max-h-40 overflow-y-auto custom-scrollbar">
+                                {historyList.filter(h => h.type === 'download').slice(0, 10).map((h) => (
+                                   <div key={h.id} className="px-2 py-1.5 text-[11px] flex justify-between items-center hover:bg-[#1E3A8A]/5 dark:hover:bg-[#FFFFF0]/5 text-[#1E3A8A] dark:text-[#FFFFF0] transition-colors rounded">
+                                      <span className="truncate flex-1 text-xs opacity-90" title={h.title}>{h.title?.replace('Tải PDF: ', '')} ({h.data?.mode})</span>
+                                      <span className={h.data?.success ? "text-emerald-600 dark:text-emerald-400 font-medium ml-2 shrink-0 text-[10px]" : "text-amber-600 dark:text-amber-400 font-medium ml-2 shrink-0 text-[10px]"}>
+                                         {h.data?.success ? 'Thành công' : 'Thất bại'}
+                                      </span>
+                                   </div>
+                                ))}
+                              </div>
+                            </>
+                         )}
                       </DropdownMenuContent>
                    </DropdownMenu>
 
@@ -901,7 +1111,30 @@ export default function App() {
                    </Button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar" id="document-print-area">
+              <div 
+                 className="flex-1 overflow-y-auto custom-scrollbar" 
+                 id="document-print-area"
+                 onScroll={(e) => {
+                    if (!isBookmarked || !selectedNode) return;
+                    const target = e.target as HTMLDivElement;
+                    if (target.scrollHeight > target.clientHeight) {
+                        let percent = Math.floor((target.scrollTop / (target.scrollHeight - target.clientHeight)) * 100);
+                        if (percent > 100) percent = 100;
+                        if (percent < 0) percent = 0;
+                        
+                        // We check if progress changed significantly or reached 100
+                        const currentBm = bookmarks.find(b => b.id === String(selectedNode.id || selectedNode.a_attr?.href));
+                        if (currentBm) {
+                            if (!currentBm.progress || Math.abs(currentBm.progress - percent) >= 5 || percent === 100) {
+                                // Update IDB and state
+                                updateBookmarkMeta(currentBm.id, { progress: percent }).then(() => {
+                                    setBookmarks(prev => prev.map(b => b.id === currentBm.id ? { ...b, progress: percent } : b));
+                                });
+                            }
+                        }
+                    }
+                 }}
+              >
                 <div className="p-6 md:p-10 lg:p-16 max-w-4xl mx-auto">
                   {isLoadingContent ? (
                      <div className="space-y-8 pt-6">
@@ -916,7 +1149,7 @@ export default function App() {
                         <div className="space-y-6">
                           {documentContent.split(/\n\s*\n/).filter(p => p.trim() !== '').map((para, i) => (
                             <div key={i} id={`para-${i}`} className="mb-8 relative group/para">
-                               {inlineTranslations[i] ? (
+                               {inlineTranslations[i] && !hiddenTranslations[i] ? (
                                   <div className="pdf-translation-text">
                                       <ParsedTranslatedBlock 
                                          htmlText={inlineTranslations[i]}
@@ -939,18 +1172,19 @@ export default function App() {
                                   </div>
                                )}
 
-                               {/* Quick Action Toolbar (only for untranslated or to add notes) */}
-                               <div className="absolute -left-12 top-0 mt-1 hidden md:flex flex-col gap-2 opacity-0 group-hover/para:opacity-100 transition-opacity">
+                               {/* Quick Action Toolbar (Desktop) */}
+                               <div className="absolute bottom-full right-0 hidden md:flex flex-row gap-2 opacity-0 group-hover/para:opacity-100 transition-opacity z-10 pb-2">
                                   <Button
                                     size="icon"
                                     variant="outline"
                                     onClick={() => handleToggleHighlight(i)}
-                                    className={`w-8 h-8 rounded-lg ${documentHighlights[i] ? 'text-white bg-[#f0c94a] border-[#f0c94a] dark:text-[#1e1f22] dark:bg-[#7fd1b9] dark:border-[#7fd1b9]' : 'text-[#1E3A8A] border-[#1E3A8A]/30 dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10'}`}
+                                    className={`w-8 h-8 rounded-lg shadow-sm ${documentHighlights[i] ? 'text-white bg-[#f0c94a] border-[#f0c94a] dark:text-[#1e1f22] dark:bg-[#7fd1b9] dark:border-[#7fd1b9]' : 'bg-white text-[#1E3A8A] border-[#1E3A8A]/30 dark:bg-[#1e1f22] dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10'}`}
                                     title="Highlight đoạn này"
                                   >
                                       <Highlighter className="w-4 h-4" />
                                   </Button>
-                                  {!inlineTranslations[i] && (
+                                  
+                                  {!inlineTranslations[i] ? (
                                      <Button
                                        size="icon"
                                        variant="outline"
@@ -961,7 +1195,53 @@ export default function App() {
                                      >
                                          {activeTranslateIndex === i ? <Loader2 className="w-4 h-4 animate-spin" /> : <Languages className="w-4 h-4" />}
                                      </Button>
+                                  ) : (
+                                     <>
+                                        <Button
+                                          size="icon"
+                                          variant="outline"
+                                          onClick={() => setHiddenTranslations(prev => ({...prev, [i]: !prev[i]}))}
+                                          className="w-8 h-8 rounded-lg text-[#1E3A8A] border-[#1E3A8A]/30 dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10"
+                                          title={hiddenTranslations[i] ? "Hiện dịch nghĩa cũ" : "Ẩn dịch nghĩa"}
+                                        >
+                                            {hiddenTranslations[i] ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                                        </Button>
+                                        <Button
+                                          size="icon"
+                                          variant="outline"
+                                          onClick={async () => {
+                                             const nodeHref = selectedNode?.a_attr?.href || String(selectedNode?.id || '');
+                                             await saveTranslation(`${script}_${nodeHref}_para_${i}`, inlineTranslations[i]);
+                                             const btn = document.getElementById(`save-btn-${i}`);
+                                             if (btn) {
+                                               const originalHtml = btn.innerHTML;
+                                               btn.innerHTML = `<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+                                               btn.classList.add('text-emerald-500', 'border-emerald-500/30');
+                                               setTimeout(() => {
+                                                  btn.innerHTML = originalHtml;
+                                                  btn.classList.remove('text-emerald-500', 'border-emerald-500/30');
+                                               }, 2000);
+                                             }
+                                          }}
+                                          className="w-8 h-8 rounded-lg text-[#1E3A8A] border-[#1E3A8A]/30 dark:text-[#FFFFF0] dark:border-[#FFFFF0]/30 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 transition-colors"
+                                          title="Lưu dịch nghĩa (Lâu dài)"
+                                          id={`save-btn-${i}`}
+                                        >
+                                            <Save className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                          size="icon"
+                                          variant="outline"
+                                          onClick={() => handleTranslateSingle(i, true)}
+                                          disabled={activeTranslateIndex === i}
+                                          className="w-8 h-8 rounded-lg text-emerald-600 border-emerald-600/30 dark:text-emerald-400 dark:border-emerald-400/30 hover:bg-emerald-600/10 dark:hover:bg-emerald-400/10"
+                                          title="Dịch mới"
+                                        >
+                                            {activeTranslateIndex === i ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                        </Button>
+                                     </>
                                   )}
+                                  
                                   <Button
                                     size="icon"
                                     variant="outline"
@@ -974,16 +1254,44 @@ export default function App() {
                                </div>
 
                                {/* Mobile Action bar */}
-                               <div className="flex md:hidden gap-3 mt-3 opacity-60">
+                               <div className="flex flex-wrap md:hidden gap-3 mt-3 opacity-60">
                                   <button onClick={() => handleToggleHighlight(i)} className={`flex items-center gap-1.5 text-xs ${documentHighlights[i] ? 'text-[#f0c94a] dark:text-[#7fd1b9]' : 'text-[#1E3A8A] dark:text-[#FFFFF0]'}`}>
                                       <Highlighter className="w-3.5 h-3.5" />
                                       {documentHighlights[i] ? 'Bỏ Highlight' : 'Highlight'}
                                   </button>
-                                  {!inlineTranslations[i] && (
+                                  {!inlineTranslations[i] ? (
                                     <button onClick={() => handleTranslateSingle(i)} className="flex items-center gap-1.5 text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
                                         {activeTranslateIndex === i ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Languages className="w-3.5 h-3.5" />}
-                                        Dịch đoạn này
+                                        Dịch đoạn
                                     </button>
+                                  ) : (
+                                    <>
+                                       <button onClick={() => setHiddenTranslations(prev => ({...prev, [i]: !prev[i]}))} className="flex items-center gap-1.5 text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
+                                           {hiddenTranslations[i] ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                           {hiddenTranslations[i] ? "Hiện dịch" : "Ẩn dịch"}
+                                       </button>
+                                       <button id={`save-btn-mob-${i}`} onClick={async () => {
+                                             const nodeHref = selectedNode?.a_attr?.href || String(selectedNode?.id || '');
+                                             await saveTranslation(`${script}_${nodeHref}_para_${i}`, inlineTranslations[i]);
+                                             const btn = document.getElementById(`save-btn-mob-${i}`);
+                                             if (btn) {
+                                               const originalHtml = btn.innerHTML;
+                                               btn.innerHTML = `<svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Đã lưu`;
+                                               btn.classList.add('text-emerald-500');
+                                               setTimeout(() => {
+                                                  btn.innerHTML = originalHtml;
+                                                  btn.classList.remove('text-emerald-500');
+                                               }, 2000);
+                                             }
+                                          }} className="flex items-center gap-1.5 text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
+                                           <Save className="w-3.5 h-3.5" />
+                                           Lưu dịch
+                                       </button>
+                                       <button onClick={() => handleTranslateSingle(i, true)} className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                                           {activeTranslateIndex === i ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                           Dịch mới
+                                       </button>
+                                    </>
                                   )}
                                   <button onClick={() => handleEditNote(i)} className="flex items-center gap-1.5 text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
                                       <PenLine className="w-3.5 h-3.5" />
@@ -1139,7 +1447,7 @@ export default function App() {
                     <div className="p-6 md:p-8">
                        {translationResult ? (
                          <div className="markdown-body prose prose-sky dark:prose-invert max-w-none text-[#1E3A8A] dark:text-[#FFFFF0]">
-                           <Markdown remarkPlugins={[remarkGfm]}>{translationResult}</Markdown>
+                           <Markdown remarkPlugins={[remarkGfm]}>{typeof translationResult === 'string' ? translationResult : String(translationResult)}</Markdown>
                          </div>
                        ) : isTranslating ? (
                          <div className="space-y-6">
@@ -1172,7 +1480,7 @@ export default function App() {
                              </div>
                            ) : (
                              <div className="markdown-body prose prose-sky dark:prose-invert max-w-none text-[#1E3A8A] dark:text-[#FFFFF0]">
-                               <Markdown remarkPlugins={[remarkGfm]}>{vocabData}</Markdown>
+                               <Markdown remarkPlugins={[remarkGfm]}>{typeof vocabData === 'string' ? vocabData : String(vocabData)}</Markdown>
                              </div>
                            )}
                         </div>
@@ -1196,24 +1504,57 @@ export default function App() {
                          <p className="text-base font-semibold">Bạn có thắc mắc gì về Phật học?</p>
                       </div>
                     ) : (
-                      chatMessages.map((msg, i) => (
-                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] rounded-[24px] px-6 py-4 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' 
-                            ? 'bg-transparent text-white rounded-br-none shadow-[0_4px_14px_0_rgba(30,58,138,0.3)]' 
-                            : 'bg-white dark:bg-transparent border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 text-[#1E3A8A] dark:text-[#FFFFF0] rounded-bl-none'}`}>
-                            <div className="markdown-body prose prose-sm dark:prose-invert max-w-none prose-p:my-1">
-                              <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+                      chatMessages.map((msg, i) => {
+                        let mainContent = msg.content;
+                        let suggestions: string[] = [];
+                        
+                        if (msg.role === 'ai') {
+                           const suggestSplit = mainContent.split('---SUGGESTIONS---');
+                           if (suggestSplit.length > 1) {
+                              mainContent = suggestSplit[0].trim();
+                              const sugText = suggestSplit[1].trim();
+                              const lines = sugText.split('\\n');
+                              lines.forEach(line => {
+                                 const m = line.match(/^\\d+\\.\\s*(.*)/);
+                                 if (m) suggestions.push(m[1].trim());
+                              });
+                           }
+                        }
+
+                        return (
+                        <div key={i} className="flex flex-col gap-2">
+                          <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] rounded-[24px] px-6 py-4 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' 
+                              ? 'bg-transparent text-[#1E3A8A] border border-[#1E3A8A] dark:border-[#FFFFF0] dark:text-[#FFFFF0] rounded-br-none shadow-[0_4px_14px_0_rgba(30,58,138,0.3)]' 
+                              : 'bg-white dark:bg-[#1e1f22] border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 text-[#1E3A8A] dark:text-[#FFFFF0] rounded-bl-none'}`}>
+                              <div className="markdown-body prose prose-sm dark:prose-invert max-w-none prose-p:my-1">
+                                <Markdown remarkPlugins={[remarkGfm]}>{typeof mainContent === 'string' ? mainContent : String(mainContent)}</Markdown>
+                              </div>
                             </div>
                           </div>
+                          {suggestions.length > 0 && (
+                            <div className="flex flex-col gap-2 mt-2 w-[85%]">
+                               {suggestions.map((sug, sugIdx) => (
+                                 <button
+                                   key={sugIdx}
+                                   onClick={() => handleSendChat(sug)}
+                                   className="text-left w-full p-3 text-sm bg-[#1E3A8A]/5 dark:bg-[#FFFFF0]/5 hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 border border-[#1E3A8A]/20 dark:border-[#FFFFF0]/20 text-[#1E3A8A] dark:text-[#FFFFF0] rounded-2xl transition-all shadow-sm flex items-center justify-between group"
+                                 >
+                                   <span>{sug}</span>
+                                   <Sparkles className="w-4 h-4 opacity-50 group-hover:opacity-100 group-hover:text-amber-500" />
+                                 </button>
+                               ))}
+                            </div>
+                          )}
                         </div>
-                      ))
+                      )})
                     )}
                     {isChatting && (
                        <div className="flex justify-start">
-                         <div className="bg-white dark:bg-transparent border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 rounded-[24px] rounded-bl-none px-6 py-5 flex gap-2 items-center shadow-sm">
-                            <div className="w-2 h-2 bg-transparent rounded-full animate-bounce" />
-                            <div className="w-2 h-2 bg-transparent rounded-full animate-bounce [animation-delay:0.2s]" />
-                            <div className="w-2 h-2 bg-transparent rounded-full animate-bounce [animation-delay:0.4s]" />
+                         <div className="bg-white dark:bg-[#1E1F22] border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 rounded-[24px] rounded-bl-none px-6 py-5 flex gap-2 items-center shadow-sm">
+                            <div className="w-2 h-2 bg-[#1E3A8A] dark:bg-[#FFFFF0] rounded-full animate-dots" />
+                            <div className="w-2 h-2 bg-[#1E3A8A] dark:bg-[#FFFFF0] rounded-full animate-dots" style={{ animationDelay: '0.15s' }} />
+                            <div className="w-2 h-2 bg-[#1E3A8A] dark:bg-[#FFFFF0] rounded-full animate-dots" style={{ animationDelay: '0.3s' }} />
                          </div>
                        </div>
                     )}
@@ -1256,21 +1597,50 @@ export default function App() {
                         <div className="space-y-3">
                            {bookmarks.map((bm, idx) => (
                               <div key={bm.id || bm.a_attr?.href || idx} 
-                                 onClick={() => handleSelectNode(bm)}
-                                 className="group flex flex-col p-4 rounded-2xl border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 bg-white dark:bg-transparent hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 hover:border-[#1E3A8A]/50 dark:hover:border-[#FFFFF0]/50 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md">
-                                 <div className="flex items-start justify-between gap-4">
+                                 className="group flex flex-col p-4 rounded-2xl border border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 bg-white dark:bg-transparent hover:bg-[#1E3A8A]/10 dark:hover:bg-[#FFFFF0]/10 hover:border-[#1E3A8A]/50 dark:hover:border-[#FFFFF0]/50 transition-all duration-300 shadow-sm hover:shadow-md relative">
+                                 <div className="flex items-start justify-between gap-4 cursor-pointer" onClick={() => handleSelectNode(bm.node || bm)}>
                                     <div className="flex-1 min-w-0">
-                                       <h4 className="font-serif font-bold text-[#1E3A8A] dark:text-[#FFFFF0] truncate text-base">{bm.text || bm.paliName || "Văn bản đã lưu"}</h4>
-                                       <p className="font-sans text-sm text-[#1E3A8A] dark:text-[#FFFFF0] line-clamp-1 mt-1">{bm.name}</p>
+                                       <h4 className="font-serif font-bold text-[#1E3A8A] dark:text-[#FFFFF0] truncate text-base">{bm.title || bm.text || bm.paliName || "Văn bản đã lưu"}</h4>
+                                       <p className="font-sans text-xs text-[#1E3A8A]/70 dark:text-[#FFFFF0]/70 line-clamp-1 mt-1">{bm.node?.name || bm.name}</p>
                                     </div>
                                     <Button 
                                        variant="ghost" 
                                        size="icon" 
                                        onClick={(e) => removeBookmark(bm.id || bm.a_attr?.href || idx, e)}
-                                       className="w-8 h-8 text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-white hover:bg-[#1E3A8A] dark:hover:bg-[#FFFFF0]/80 dark:hover:text-[#3A3F47] opacity-0 group-hover:opacity-100 transition-all duration-300 rounded-xl shrink-0"
+                                       className="w-8 h-8 text-[#1E3A8A] dark:text-[#FFFFF0] hover:text-white hover:bg-red-500 hover:border-red-500 opacity-0 group-hover:opacity-100 transition-all duration-300 rounded-xl shrink-0"
                                     >
                                        <Trash2 className="w-4 h-4" />
                                     </Button>
+                                 </div>
+                                 <div className="mt-3 flex items-center justify-between text-xs text-[#1E3A8A] dark:text-[#FFFFF0]">
+                                    <div className="flex items-center gap-1 group/stars">
+                                       <span className="opacity-70 mr-1">Độ khó:</span>
+                                       {[1, 2, 3, 4, 5].map(star => (
+                                          <svg 
+                                             key={star}
+                                             onClick={async (e) => {
+                                                e.stopPropagation();
+                                                const newDiff = bm.difficulty === star ? 0 : star;
+                                                await updateBookmarkMeta(bm.id, { difficulty: newDiff });
+                                                setBookmarks(prev => prev.map(b => b.id === bm.id ? { ...b, difficulty: newDiff } : b));
+                                             }}
+                                             className={`w-3.5 h-3.5 cursor-pointer transition-colors ${
+                                                (bm.difficulty || 0) >= star 
+                                                   ? 'text-yellow-500 fill-yellow-500' // Using color for filled
+                                                   : 'text-[#1E3A8A]/30 dark:text-[#FFFFF0]/30 hover:text-yellow-400'
+                                             }`}
+                                             xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                          >
+                                             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                          </svg>
+                                       ))}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                       <span className="opacity-70">Tiến độ: {bm.progress || 0}%</span>
+                                       <div className="w-16 h-1.5 rounded-full bg-[#1E3A8A]/10 dark:bg-[#FFFFF0]/10 overflow-hidden">
+                                          <div className="h-full bg-emerald-500 dark:bg-emerald-400" style={{ width: `${bm.progress || 0}%` }}></div>
+                                       </div>
+                                    </div>
                                  </div>
                               </div>
                            ))}
@@ -1288,7 +1658,7 @@ export default function App() {
                          <h3 className="font-bold text-[#1E3A8A] dark:text-[#FFFFF0] mb-1.5 flex items-center gap-2"><Cpu className="w-4 h-4 text-[#1E3A8A] dark:text-[#FFFFF0]" /> Cấu Hình AI</h3>
                          <p className="text-xs font-medium text-[#1E3A8A] dark:text-[#FFFFF0] mb-4">Cung cấp lựa chọn công nghệ tương tác phù hợp nhất cho việc tìm kiếm.</p>
                          
-                         <label className="block text-sm font-semibold mb-2 text-[#1E3A8A] dark:text-[#FFFFF0]">Nhà cung cấp Mô hình</label>
+                         <label className="block text-sm font-semibold mb-2 text-[#1E3A8A] dark:text-[#FFFFF0]">Nền tảng Mô hình</label>
                          <Select value={draftAiConfig.provider} onValueChange={(val: any) => setDraftAiConfig({...draftAiConfig, provider: val})}>
                            <SelectTrigger className="w-full rounded-xl bg-white dark:bg-transparent h-12 border-[#1E3A8A]/50 dark:border-[#FFFFF0]/30 focus:ring-[#1E3A8A]/50 transition-all font-medium mb-5 shadow-sm">
                              <SelectValue />
@@ -1301,7 +1671,7 @@ export default function App() {
                            </SelectContent>
                          </Select>
 
-                         <label className="block text-sm font-semibold mb-2 text-[#1E3A8A] dark:text-[#FFFFF0]">Tên Mô hình (Model Name)</label>
+                         <label className="block text-sm font-semibold mb-2 text-[#1E3A8A] dark:text-[#FFFFF0]">Tên Mô hình</label>
                          <input 
                            type="text" 
                            value={draftAiConfig.model}
@@ -1310,7 +1680,7 @@ export default function App() {
                            placeholder="Ví dụ: gpt-4o, claude-3-opus..."
                          />
 
-                         <label className="block text-sm font-semibold mb-2 text-[#1E3A8A] dark:text-[#FFFFF0]">API Key Khách Hàng</label>
+                         <label className="block text-sm font-semibold mb-2 text-[#1E3A8A] dark:text-[#FFFFF0]">API Key</label>
                          <p className="text-[11px] font-medium text-[#1E3A8A] dark:text-[#FFFFF0] mb-2 leading-relaxed">Bộ khóa được lưu trữ an toàn trong trình duyệt cục bộ của bạn, không gửi đi bất kỳ hệ thống lưu trữ bên ngoài nào khác.</p>
                          <input 
                            type="password" 
